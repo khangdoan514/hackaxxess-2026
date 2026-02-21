@@ -226,4 +226,91 @@ Diagnosis Decoder is designed as clinical decision support and does not replace 
 
 - Outputs are decision support, not medical diagnoses.  
 
-- Requires clinician oversight.  
+- Requires clinician oversight.
+
+---
+
+## **Setup & Run**
+
+### Project structure
+
+```
+project-root/
+├── backend/
+│   ├── app/
+│   │   ├── main.py       # FastAPI entrypoint, ML load, MongoDB
+│   │   ├── api.py        # API routes (auth, record, diagnosis, patient)
+│   │   ├── config.py     # Configuration
+│   │   └── auth.py       # JWT and password hashing
+│   ├── data/             # model.pkl, vectorizer.pkl, uploads (add after training)
+│   ├── train.py          # KNN training script (Kaggle dataset)
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── pages/        # Login, Record, Diagnosis, PatientDashboard
+│   │   ├── components/   # ProtectedRoute, etc.
+│   │   ├── context/      # AuthContext
+│   │   └── lib/          # api.js (axios)
+│   └── package.json
+└── README.md
+```
+
+### Backend
+
+1. From project root: `cd backend`
+2. Create venv: `python -m venv venv`
+3. Activate: `venv\Scripts\activate` (Windows) or `source venv/bin/activate` (Linux/Mac)
+4. Install: `pip install -r requirements.txt`
+5. Optional: set `.env` in `backend/` (see below)
+6. Run: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` (from `backend/` so `app` package is found)
+
+**Optional – Speech-to-text (Whisper):** If `pip install -r requirements.txt` fails on Windows with an error building the `av` package (FFmpeg bindings), the core app will still run; the transcribe endpoint returns a stub transcript. To enable real transcription, install Whisper separately (e.g. in WSL or a conda env with FFmpeg): `pip install -r requirements-whisper.txt`.
+
+Backend runs at **http://localhost:8000**.
+
+### Frontend
+
+1. From project root: `cd frontend`
+2. Install: `npm install`
+3. Copy `.env.example` to `.env` and set `VITE_API_URL=http://localhost:8000`
+4. Run: `npm run dev`
+
+Frontend runs at **http://localhost:5173**.
+
+### Kaggle & ML training
+
+1. Install Kaggle CLI: `pip install kaggle`
+2. Place `kaggle.json` in `~/.kaggle` (Linux/Mac) or `C:\Users\<username>\.kaggle` (Windows)
+3. From `backend/`: `python train.py` (downloads dataset and writes `data/model.pkl`, `data/vectorizer.pkl`)
+
+Or download manually:
+
+```bash
+kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend/data --unzip
+```
+
+Then run `python train.py` from `backend/`.
+
+### Environment variables
+
+**Backend** (e.g. `backend/.env`):
+
+- `MONGO_URI` — MongoDB connection string (default: `mongodb://localhost:27017`)
+- `DB_NAME` — Database name (default: `diagnosis_decoder`)
+- `MODEL_PATH` — Path to `model.pkl` (default: `backend/data/model.pkl`)
+- `VECTORIZER_PATH` — Path to `vectorizer.pkl`
+- `JWT_SECRET` — Secret for JWT signing (set in production)
+- `KAGGLE_DATASET` — Kaggle dataset (for training script)
+- `DATA_DIR` — Directory for data (default: `backend/data`)
+
+**Frontend** (e.g. `frontend/.env`):
+
+- `VITE_API_URL` — Backend base URL (e.g. `http://localhost:8000`)
+
+### Success criteria
+
+- Doctor can sign up / log in and record audio; backend transcribes with Whisper.
+- Backend extracts symptoms and runs KNN; returns disease list with common/edge classification.
+- Doctor can confirm diagnosis and enter prescription; data saved to MongoDB.
+- Patient can log in and open dashboard to see diagnosis, explanation, edge cases, and prescription.
+- Auth: login/signup and role-based access (doctor: Record, Diagnosis; patient: Dashboard).

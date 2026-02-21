@@ -1,0 +1,16 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Backend data (raw Kaggle downloads; model/vectorizer can be added after training)
+backend/data/*.csv
+backend/data/*.zip
+backend/data/upload_*
+
+# Python
+backend/venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/

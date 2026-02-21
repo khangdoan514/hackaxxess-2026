@@ -1,3 +1,25 @@
 fastapi==0.127.0
-uvicorn==0.41.0
-asyncio==4.0.0
+uvicorn[standard]==0.41.0
+python-multipart==0.0.12
+pydantic==2.10.0
+pydantic-settings==2.6.0
+python-dotenv==1.0.1
+
+# ML
+scikit-learn==1.5.2
+numpy==2.2.0
+pandas==2.2.3
+
+# Whisper: optional (often fails on Windows due to av/FFmpeg). Install with: pip install -r requirements-whisper.txt
+# Uncomment to enable transcription, or use requirements-whisper.txt:
+# faster-whisper==1.0.3
+
+# MongoDB
+pymongo==4.10.1
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Kaggle (for training script)
+kaggle==1.6.12
