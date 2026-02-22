@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Login from './pages/Login';
 import DoctorDashboard from './pages/DoctorDashboard';
@@ -8,7 +8,23 @@ import Diagnosis from './pages/Diagnosis';
 import PatientDashboard from './pages/PatientDashboard';
 import PatientProfile from './pages/PatientProfile';
 import PatientAppointments from './pages/PatientAppointments';
+import Profile from './pages/Profile';
+import Appointment from './pages/Appointment';
 import './App.css';
+
+/** Renders Profile or PatientProfile based on user role. Must be used inside AuthProvider. */
+function ProfileRoute() {
+  const { user } = useAuth();
+  if (user?.role === 'patient') return <PatientProfile />;
+  return <Profile />;
+}
+
+/** Renders Appointment or PatientAppointments based on user role. Must be used inside AuthProvider. */
+function AppointmentsRoute() {
+  const { user } = useAuth();
+  if (user?.role === 'patient') return <PatientAppointments />;
+  return <Appointment />;
+}
 
 function App() {
   return (
@@ -30,16 +46,16 @@ function App() {
           <Route
             path="/profile"
             element={
-              <ProtectedRoute role="doctor">
-                <Profile />
+              <ProtectedRoute>
+                <ProfileRoute />
               </ProtectedRoute>
             }
           />
           <Route
             path="/appointments"
             element={
-              <ProtectedRoute role="doctor">
-                <Appointment />
+              <ProtectedRoute>
+                <AppointmentsRoute />
               </ProtectedRoute>
             }
           />
@@ -82,22 +98,6 @@ function App() {
             element={
               <ProtectedRoute role="patient">
                 <PatientDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute role="patient">
-                <PatientProfile />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/appointments"
-            element={
-              <ProtectedRoute role="patient">
-                <PatientAppointments />
               </ProtectedRoute>
             }
           />
