@@ -291,21 +291,67 @@ kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning
 
 Then run `python train.py` from `backend/`.
 
-### Environment variables
+### Configuration reference
 
-**Backend** (e.g. `backend/.env`):
+All config is via environment variables. Use a `.env` file in each app folder (see `.env.example`). Do not commit real secrets.
 
-- `MONGO_URI` — MongoDB connection string (default: `mongodb://localhost:27017`)
-- `DB_NAME` — Database name (default: `diagnosis_decoder`)
-- `MODEL_PATH` — Path to `model.pkl` (default: `backend/data/model.pkl`)
-- `VECTORIZER_PATH` — Path to `vectorizer.pkl`
-- `JWT_SECRET` — Secret for JWT signing (set in production)
-- `KAGGLE_DATASET` — Kaggle dataset (for training script)
-- `DATA_DIR` — Directory for data (default: `backend/data`)
+#### Backend (`backend/.env`)
 
-**Frontend** (e.g. `frontend/.env`):
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `MONGO_URI` | MongoDB connection string (local or Atlas). | `mongodb://localhost:27017` | No (app works with in-memory fallback if unset/failed) |
+| `DB_NAME` | MongoDB database name. | `diagnosis_decoder` | No |
+| `DATA_DIR` | Directory for ML files and uploads. Relative to `backend/`. | `data` → `backend/data` | No |
+| `MODEL_PATH` | Path to trained KNN model file. Relative to `backend/` or absolute. | `data/model.pkl` | No (analysis returns stub if missing) |
+| `VECTORIZER_PATH` | Path to symptom vectorizer pickle. Relative to `backend/` or absolute. | `data/vectorizer.pkl` | No |
+| `KAGGLE_DATASET` | Kaggle dataset for training script (e.g. `owner/dataset-name`). | `kaushil268/disease-prediction-using-machine-learning` | No (only for `train.py`) |
+| `JWT_SECRET` | Secret key for signing JWTs. Use a long random string in production. | `change-me-in-production` | Yes in production |
 
-- `VITE_API_URL` — Backend base URL (e.g. `http://localhost:8000`)
+**Backend path rules:** Relative values (e.g. `data`, `data/model.pkl`) are resolved from the `backend/` directory. Absolute paths are used as-is.
+
+**Example `backend/.env`:**
+
+```env
+MONGO_URI=mongodb://localhost:27017
+DB_NAME=diagnosis_decoder
+DATA_DIR=data
+MODEL_PATH=data/model.pkl
+VECTORIZER_PATH=data/vectorizer.pkl
+KAGGLE_DATASET=kaushil268/disease-prediction-using-machine-learning
+JWT_SECRET=your-long-random-secret-here
+```
+
+**Optional – Kaggle API (for `train.py`):** If not using `kaggle.json` in `~/.kaggle` or `%USERPROFILE%\.kaggle`, you can set:
+
+| Variable | Description |
+|----------|-------------|
+| `KAGGLE_USERNAME` | Your Kaggle username |
+| `KAGGLE_KEY` | Your Kaggle API key |
+
+#### Frontend (`frontend/.env`)
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `VITE_API_URL` | Backend API base URL (no trailing slash). Leave **empty** in dev to use Vite proxy (`/api` → backend). | (empty) | No |
+
+**Example `frontend/.env` (development with proxy):**
+
+```env
+# Leave empty so the app calls /api and Vite proxies to the backend (no CORS).
+# VITE_API_URL=
+```
+
+**Example `frontend/.env` (production or direct backend URL):**
+
+```env
+VITE_API_URL=https://your-api.example.com
+```
+
+#### Summary
+
+- **Backend:** Copy `backend/.env.example` to `backend/.env`, set `MONGO_URI` and `JWT_SECRET` at minimum.
+- **Frontend:** Copy `frontend/.env.example` to `frontend/.env`; leave `VITE_API_URL` empty for local dev.
+- **Secrets:** Never commit `.env`; it is in `.gitignore`.
 
 ### Success criteria
 
