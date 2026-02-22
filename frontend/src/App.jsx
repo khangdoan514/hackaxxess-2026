@@ -7,6 +7,7 @@ import Record from './pages/Record';
 import Diagnosis from './pages/Diagnosis';
 import PatientDashboard from './pages/PatientDashboard';
 import Appointment from './pages/Appointment';
+import Profile from './pages/Profile';
 import './App.css';
 
 function App() {
@@ -23,6 +24,14 @@ function App() {
             element={
               <ProtectedRoute role="doctor">
                 <DoctorDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute role="doctor">
+                <Profile />
               </ProtectedRoute>
             }
           />

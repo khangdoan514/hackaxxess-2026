@@ -59,7 +59,7 @@ export default function PatientDashboard() {
         )}
         
         {data && !loading && (
-          <div className="space-y-6">
+          <div className="text-white space-y-6">
             {/* Latest Diagnosis Card */}
             <div className="rounded-xl bg-gray-800 p-8">
               <h2 className="text-xl font-semibold mb-4">Latest Diagnosis</h2>
