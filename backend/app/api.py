@@ -5,13 +5,14 @@ import logging
 import re
 import uuid
 from pathlib import Path
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from app.config import DATA_DIR
-from app.auth import hash_password, verify_password, create_access_token, decode_access_token
+from config import DATA_DIR
+from auth import hash_password, verify_password, create_access_token, decode_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,16 @@ class ConfirmResponse(BaseModel):
     success: bool
     diagnosis_id: str | None = None
     prescription_id: str | None = None
+
+
+class PatientTwinInput(BaseModel):
+    transcript: str = Field(..., description="Text from speech-to-text")
+    patient_id: str | None = None
+
+
+class PatientTwinResponse(BaseModel):
+    success: bool
+    patient_twin: dict
 
 
 # ---------- Symptom extraction (simple keyword/pattern) ----------
@@ -258,7 +269,7 @@ async def record_transcribe(
         raise HTTPException(404, "Upload not found or expired")
     path_str = str(path)
     try:
-        from faster_whisper import WhisperModel
+        from faster_whisper import WhisperModel # type: ignore
         model = WhisperModel("large-v3", device="cpu", compute_type="int8")
         segments, _ = model.transcribe(path_str)
         transcript = " ".join(s["text"] for s in segments).strip() or "[No speech detected]"
@@ -411,6 +422,119 @@ async def diagnosis_confirm(
     _memory_diagnoses.setdefault(patient_id, []).append(diagnosis_doc)
     _memory_prescriptions.setdefault(patient_id, []).append(prescription_doc)
     return ConfirmResponse(success=True, diagnosis_id=diagnosis_id, prescription_id=prescription_doc["id"])
+
+
+@router.post("/diagnosis/patient-twin", response_model=PatientTwinResponse)
+async def generate_patient_twin(
+    body: PatientTwinInput,
+    request: Request,
+    user=Depends(require_doctor),
+):
+    """
+    Generate a complete "Patient Twin" from conversation:
+    - Extracted symptoms with confidence
+    - Top diagnoses with probabilities
+    - Risk score
+    - Patient-friendly story summary
+    - QR code data
+    - Audio summary snippet
+    """
+    model = get_model(request)
+    vectorizer = get_vectorizer(request)
+    
+    # Extract symptoms
+    symptoms = extract_symptoms_from_transcript(body.transcript)
+    text_for_vec = _symptom_text_for_vectorizer(symptoms)
+    
+    # Get predictions
+    predictions = []
+    risk_score = "LOW"
+    
+    if vectorizer and model and text_for_vec:
+        try:
+            X = vectorizer.transform([text_for_vec])
+            if hasattr(model, "predict_proba"):
+                probs = model.predict_proba(X)[0]
+                classes = model.classes_
+                top_indices = probs.argsort()[-5:][::-1]
+                predictions = [
+                    {
+                        "disease": str(classes[i]),
+                        "probability": round(float(probs[i]), 2),
+                    }
+                    for i in top_indices if probs[i] > 0.05
+                ]
+                
+                # Calculate risk score
+                top_prob = probs[top_indices[0]] if top_indices.size > 0 else 0
+                if top_prob > 0.7 or len(symptoms) >= 4:
+                    risk_score = "HIGH"
+                elif top_prob > 0.4 or len(symptoms) >= 2:
+                    risk_score = "MEDIUM"
+        except Exception as e:
+            logger.warning(f"Prediction failed: {e}")
+    
+    # Generate patient-friendly story
+    story = f"During your visit, you mentioned "
+    if symptoms:
+        story += f"{', '.join(symptoms[:3])}"
+        if len(symptoms) > 3:
+            story += f" and {len(symptoms)-3} other symptoms"
+    else:
+        story += "your health concerns"
+    
+    if predictions:
+        story += f". Based on this, we discussed the possibility of {predictions[0]['disease'].lower()}. "
+    else:
+        story += ". "
+    
+    story += f"Your risk level appears to be {risk_score}. "
+    
+    if risk_score == "HIGH":
+        story += "We recommend seeing a specialist soon and following up within 48 hours."
+    elif risk_score == "MEDIUM":
+        story += "We recommend scheduling a follow-up within the week."
+    else:
+        story += "Continue monitoring your symptoms and follow up as needed."
+    
+    # Generate audio summary snippet (text that would be spoken)
+    audio_summary = f"Patient presents with {', '.join(symptoms[:2])}. "
+    if predictions:
+        audio_summary += f"Top concern: {predictions[0]['disease']}. Risk level: {risk_score}."
+    
+    # QR code data (would be encoded into QR)
+    qr_data = {
+        "patient_twin_id": str(uuid.uuid4()),
+        "timestamp": str(datetime.now()),
+        "symptoms": symptoms[:5],
+        "top_diagnosis": predictions[0]["disease"] if predictions else "Unknown",
+        "risk": risk_score
+    }
+    
+    # Format symptoms with confidence scores
+    symptoms_with_confidence = []
+    for i, s in enumerate(symptoms[:10]):
+        # Simple confidence scoring based on position/frequency
+        confidence = round(0.7 + (0.03 * i), 2)
+        if confidence > 0.95:
+            confidence = 0.95
+        symptoms_with_confidence.append({
+            "symptom": s,
+            "confidence": confidence
+        })
+    
+    return PatientTwinResponse(
+        success=True,
+        patient_twin={
+            "extracted_symptoms": symptoms_with_confidence,
+            "diagnosis_predictions": predictions,
+            "risk_score": risk_score,
+            "patient_story": story,
+            "audio_summary": audio_summary,
+            "qr_data": qr_data,
+            "qr_code_url": f"/api/qr/{qr_data['patient_twin_id']}"  # You'd generate actual QR
+        }
+    )
 
 
 @router.get("/patient/{patient_id}")

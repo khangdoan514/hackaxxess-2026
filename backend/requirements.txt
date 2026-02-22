@@ -10,9 +10,8 @@ scikit-learn==1.5.2
 numpy==2.2.0
 pandas==2.2.3
 
-# Whisper: optional (often fails on Windows due to av/FFmpeg). Install with: pip install -r requirements-whisper.txt
-# Uncomment to enable transcription, or use requirements-whisper.txt:
-# faster-whisper==1.0.3
+# Whisper
+faster-whisper==1.0.3
 
 # MongoDB
 pymongo==4.10.1

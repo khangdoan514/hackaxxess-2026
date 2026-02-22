@@ -8,8 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 import uvicorn
 
-from app.config import MODEL_PATH, VECTORIZER_PATH, MONGO_URI, DB_NAME
-from app.api import router as api_router
+from config import MODEL_PATH, VECTORIZER_PATH, MONGO_URI, DB_NAME
+from api import router as api_router
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def load_ml_artifacts():
 def connect_mongo():
     """Connect to MongoDB and return (db, client)."""
     try:
-        from pymongo import MongoClient
+        from pymongo import MongoClient # type: ignore
         client = MongoClient(MONGO_URI)
         database = client[DB_NAME]
         client.admin.command("ping")
@@ -133,7 +133,7 @@ async def health_env():
 
 async def main():
     config = uvicorn.Config(
-        "app.main:app",
+        "main:app",
         host="0.0.0.0",
         port=8000,
         log_level="info",
