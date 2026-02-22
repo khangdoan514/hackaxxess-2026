@@ -11,7 +11,7 @@ import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # PDF generation
 from reportlab.lib.pagesizes import letter
@@ -22,6 +22,62 @@ from config import DATA_DIR
 from auth import hash_password, verify_password, create_access_token, decode_access_token
 
 logger = logging.getLogger(__name__)
+
+
+# Hardcoded "What this means" for specific diagnoses (used when diagnosis name matches)
+DIAGNOSIS_EXPLANATIONS = {
+    "jaundice": (
+        "Jaundice means your skin or the whites of your eyes turn yellow. This happens when a substance "
+        "called bilirubin builds up in your blood. Bilirubin is normally processed by your liver and removed "
+        "from your body, but if your liver isn't working properly, if bile flow is blocked, or if red blood "
+        "cells are breaking down too quickly, bilirubin can accumulate.\n\n"
+        "Jaundice itself is not a disease. It is a sign that something may be affecting your liver, bile ducts, "
+        "or blood. Common causes include liver inflammation, gallstones, alcohol-related liver problems, "
+        "certain medications, or infections.\n\n"
+        "You might also notice dark urine, pale stools, itching, fatigue, or abdominal discomfort.\n\n"
+        "Jaundice can range from mild and temporary to more serious, so it's important to see a doctor to find "
+        "the cause and get proper treatment."
+    ),
+}
+
+
+def _generate_diagnosis_explanation(final_diagnosis: str, symptoms: list[str] | None = None) -> str:
+    """Generate a user-friendly explanation: use hardcoded text when available, else Google Gemini (google-genai).
+    Reads GEMINI_KEY from environment for AI. Returns empty string if key missing or call fails."""
+    diag_lower = (final_diagnosis or "").strip().lower()
+    if not diag_lower:
+        return ""
+    for key, explanation in DIAGNOSIS_EXPLANATIONS.items():
+        if key in diag_lower:
+            return explanation
+    api_key = os.getenv("GEMINI_KEY", "").strip()
+    if not api_key:
+        logger.debug("GEMINI_KEY not set; skipping explanation generation")
+        return ""
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        symptom_part = ""
+        if symptoms:
+            symptom_part = f" The patient was noted to have: {', '.join(symptoms[:8])}."
+        prompt = (
+            "You are a helpful medical communicator. In 2–4 short, plain-language sentences, explain what this "
+            "diagnosis typically means for the patient—what it is, what they might expect, and what they should "
+            "do next. Do not give specific medical advice or replace a doctor's instructions. Keep the tone calm "
+            "and reassuring.\n\nDiagnosis: " + (final_diagnosis or "").strip() + symptom_part
+        )
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+        text = (getattr(response, "text", None) or "").strip()
+        if text:
+            logger.info("Gemini explanation output: %s", text)
+            print("[Gemini] explanation:", text)
+        return text if text else ""
+    except Exception as e:
+        logger.warning("Gemini explanation generation failed: %s", e)
+        return ""
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -120,6 +176,41 @@ class AnalyzeResponse(BaseModel):
     edge_cases: list[str]
 
 
+class EdgeCaseItem(BaseModel):
+    name: str = Field(..., description="Edge case / condition to monitor")
+    further_steps: str = Field(default="", description="Steps the patient should take")
+
+
+def _normalize_edge_cases(v):
+    """Accept list of strings or list of {name, further_steps}."""
+    if not v:
+        return []
+    out = []
+    for item in v:
+        if isinstance(item, str):
+            out.append(EdgeCaseItem(name=item, further_steps=""))
+        elif isinstance(item, dict):
+            out.append(EdgeCaseItem(name=item.get("name", ""), further_steps=item.get("further_steps", "") or ""))
+        else:
+            out.append(item)
+    return out
+
+
+def _edge_cases_for_patient(raw):
+    """Return list of {name, further_steps} for patient API (handles legacy string list)."""
+    if not raw:
+        return []
+    out = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append({"name": item, "further_steps": ""})
+        elif isinstance(item, dict):
+            out.append({"name": item.get("name", ""), "further_steps": item.get("further_steps", "") or ""})
+        else:
+            out.append({"name": "", "further_steps": ""})
+    return out
+
+
 class ConfirmInput(BaseModel):
     patient_email: str = Field(..., description="Patient's email; diagnosis will show on their dashboard when they log in")
     session_id: str | None = None
@@ -127,8 +218,14 @@ class ConfirmInput(BaseModel):
     prescription: dict = Field(..., description="medication, dosage, instructions")
     symptoms: list[str] = Field(default_factory=list)
     predictions: list[dict] = Field(default_factory=list)
+    edge_cases: list[EdgeCaseItem] = Field(default_factory=list, description="Edge cases with optional further steps for patient")
     save_location: str = "desktop"  # desktop, downloads, custom
     custom_filename: str | None = None
+
+    @field_validator("edge_cases", mode="before")
+    @classmethod
+    def normalize_edge_cases(cls, v):
+        return _normalize_edge_cases(v)
 
 
 class ConfirmResponse(BaseModel):
@@ -154,6 +251,12 @@ class PDFGenerateInput(BaseModel):
     prescription: dict
     symptoms: list[str] = Field(default_factory=list)
     predictions: list[dict] = Field(default_factory=list)
+    edge_cases: list[EdgeCaseItem] = Field(default_factory=list)
+
+    @field_validator("edge_cases", mode="before")
+    @classmethod
+    def normalize_edge_cases(cls, v):
+        return _normalize_edge_cases(v)
 
 
 # ---------- Symptom extraction (simple keyword/pattern) ----------
@@ -264,61 +367,70 @@ def generate_pdf(body: ConfirmInput, doctor_user):
 
 @router.post("/auth/signup", response_model=AuthResponse)
 async def auth_signup(body: SignupInput, request: Request):
-    """Register doctor or patient. Uses MongoDB if connected; otherwise in-memory (dev fallback)."""
+    """Register doctor or patient. Email is stored and matched case-insensitively."""
     db = get_db(request)
+    email_normalized = (body.email or "").strip().lower()
+    if not email_normalized:
+        raise HTTPException(400, "Email is required.")
     if db is not None:
         users = db["users"]
-        existing = users.find_one({"email": body.email})
+        existing = users.find_one({
+            "email": {"$regex": f"^{re.escape(email_normalized)}$", "$options": "i"},
+        })
         if existing:
             raise HTTPException(400, "Email already registered")
     else:
-        if body.email in _memory_users:
+        if any((e or "").strip().lower() == email_normalized for e in _memory_users):
             raise HTTPException(400, "Email already registered")
     
     user_id = str(uuid.uuid4())
     hashed = hash_password(body.password)
     
-    # Make sure to include the name in the user document
     doc = {
-        "id": user_id, 
-        "name": body.name,  # Store the name
-        "email": body.email, 
-        "hashed_password": hashed, 
-        "role": body.role
+        "id": user_id,
+        "name": (body.name or "").strip(),
+        "email": email_normalized,
+        "hashed_password": hashed,
+        "role": (body.role or "patient").lower(),
     }
     
     if db is not None:
         db["users"].insert_one(doc)
     else:
-        _memory_users[body.email] = doc
+        _memory_users[email_normalized] = doc
     
-    # Include name in the token and response
     token = create_access_token({
-        "sub": user_id, 
-        "email": body.email, 
-        "role": body.role,
-        "name": body.name
+        "sub": user_id,
+        "email": doc["email"],
+        "role": doc["role"],
+        "name": doc["name"],
     })
-    
     return AuthResponse(
         access_token=token,
         user={
-            "id": user_id, 
-            "email": body.email, 
-            "role": body.role,
-            "name": body.name
+            "id": user_id,
+            "email": doc["email"],
+            "role": doc["role"],
+            "name": doc["name"],
         },
     )
 
 
 @router.post("/auth/login", response_model=AuthResponse)
 async def auth_login(body: LoginInput, request: Request):
-    """Login and return JWT. Uses MongoDB if connected; otherwise in-memory (dev fallback)."""
+    """Login and return JWT. Uses MongoDB if connected; otherwise in-memory (dev fallback).
+    Email matching is case-insensitive."""
     db = get_db(request)
+    email_lower = (body.email or "").strip().lower()
     if db is not None:
-        user = db["users"].find_one({"email": body.email})
+        user = db["users"].find_one({
+            "email": {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"},
+        })
     else:
-        user = _memory_users.get(body.email)
+        user = next(
+            (u for e, u in _memory_users.items() if (e or "").strip().lower() == email_lower),
+            None,
+        )
     
     if not user or not verify_password(body.password, user.get("hashed_password", "")):
         raise HTTPException(401, "Invalid email or password")
@@ -499,16 +611,22 @@ async def diagnosis_analyze(
 
 
 def _resolve_patient_id_by_email(request: Request, patient_email: str) -> str:
-    """Resolve patient email to user id (from DB or in-memory). Raises HTTPException if not found."""
+    """Resolve patient email to user id (from DB or in-memory). Only matches users with role 'patient'.
+    Email matching is case-insensitive. Raises HTTPException if no patient found."""
     db = get_db(request)
-    email_lower = patient_email.strip().lower()
+    email_lower = (patient_email or "").strip().lower()
+    if not email_lower:
+        raise HTTPException(400, "Patient email is required.")
     if db is not None:
-        user = db["users"].find_one({"email": {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}})
+        user = db["users"].find_one({
+            "role": "patient",
+            "email": {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"},
+        })
         if not user:
             raise HTTPException(400, "No patient found with that email. Patient must sign up first.")
         return user.get("id") or str(user.get("_id", ""))
     for email, u in _memory_users.items():
-        if email.lower() == email_lower:
+        if (email or "").strip().lower() == email_lower and (u.get("role") or "").lower() == "patient":
             return u.get("id", "")
     raise HTTPException(400, "No patient found with that email. Patient must sign up first.")
 
@@ -538,14 +656,16 @@ async def diagnosis_confirm(
         try:
             diagnoses = db["diagnoses"]
             prescriptions = db["prescriptions"]
-            
+            explanation = _generate_diagnosis_explanation(body.final_diagnosis, body.symptoms or None)
             diagnosis_doc = {
                 "patient_id": patient_id,
                 "patient_email": body.patient_email.strip().lower(),
                 "session_id": body.session_id,
                 "symptoms": body.symptoms,
                 "predictions": body.predictions,
+                "edge_cases": [{"name": ec.name, "further_steps": ec.further_steps or ""} for ec in body.edge_cases],
                 "final_diagnosis": body.final_diagnosis,
+                "explanation": explanation,
                 "pdf_data": pdf_base64,
                 "pdf_filename": pdf_filename,
                 "created_at": datetime.now()
@@ -576,13 +696,16 @@ async def diagnosis_confirm(
             raise HTTPException(500, f"Save failed: {e}")
 
     # In-memory fallback
+    explanation = _generate_diagnosis_explanation(body.final_diagnosis, body.symptoms or None)
     diagnosis_id = str(uuid.uuid4())
     diagnosis_doc = {
         "id": diagnosis_id,
         "patient_id": patient_id,
         "symptoms": body.symptoms,
         "predictions": body.predictions,
+        "edge_cases": [{"name": ec.name, "further_steps": ec.further_steps or ""} for ec in body.edge_cases],
         "final_diagnosis": body.final_diagnosis,
+        "explanation": explanation,
         "pdf_data": pdf_base64,
         "pdf_filename": pdf_filename,
     }
@@ -766,12 +889,25 @@ async def patient_get(
         prescriptions = _memory_prescriptions.get(patient_id, [])
         latest = diagnoses[0] if diagnoses else {}
         preds = latest.get("predictions", [])
-        edge_cases = [p.get("disease", "") for p in preds if p.get("is_edge_case")]
+        raw_edge = latest.get("edge_cases") or [p.get("disease", "") for p in preds if p.get("is_edge_case")]
+        edge_cases = _edge_cases_for_patient(raw_edge)
+        explanation = (latest.get("explanation") or "").strip()
+        final_diag = (latest.get("final_diagnosis") or "").strip()
+        if final_diag and (not explanation or explanation == final_diag):
+            ai_explanation = _generate_diagnosis_explanation(
+                latest.get("final_diagnosis"),
+                latest.get("symptoms"),
+            )
+            if ai_explanation:
+                explanation = ai_explanation
+                latest["explanation"] = ai_explanation
+        if not explanation:
+            explanation = final_diag or ""
         return {
             "patient_id": patient_id,
             "diagnoses": diagnoses,
             "prescriptions": prescriptions,
-            "explanation": latest.get("final_diagnosis", "") or "",
+            "explanation": explanation,
             "edge_cases": edge_cases,
         }
 
@@ -780,6 +916,27 @@ async def patient_get(
         prescriptions_coll = db["prescriptions"]
         diagnoses = list(diagnoses_coll.find({"patient_id": patient_id}).sort("_id", -1))
         prescriptions = list(prescriptions_coll.find({"patient_id": patient_id}).sort("_id", -1))
+        latest = diagnoses[0] if diagnoses else {}
+        explanation = (latest.get("explanation") or "").strip()
+        final_diag = (latest.get("final_diagnosis") or "").strip()
+        if final_diag and (not explanation or explanation == final_diag):
+            ai_explanation = _generate_diagnosis_explanation(
+                latest.get("final_diagnosis"),
+                latest.get("symptoms"),
+            )
+            if ai_explanation:
+                explanation = ai_explanation
+                diagnoses_coll.update_one(
+                    {"_id": latest["_id"]},
+                    {"$set": {"explanation": ai_explanation}},
+                )
+                latest["explanation"] = ai_explanation
+        if not explanation:
+            explanation = final_diag or ""
+        preds = latest.get("predictions", [])
+        raw_edge = latest.get("edge_cases") or [p.get("disease", "") for p in preds if p.get("is_edge_case")]
+        edge_cases = _edge_cases_for_patient(raw_edge)
+
         # Serialize ObjectId (copy to avoid mutating cursor docs)
         def doc_to_dict(d):
             out = dict(d)
@@ -788,14 +945,10 @@ async def patient_get(
             if "pdf_data" in out and not isinstance(out["pdf_data"], str):
                 out["pdf_data"] = str(out["pdf_data"])
             return out
-        
+
         diagnoses = [doc_to_dict(d) for d in diagnoses]
         prescriptions = [doc_to_dict(d) for d in prescriptions]
-        latest = diagnoses[0] if diagnoses else {}
-        explanation = latest.get("final_diagnosis", "") or ""
-        preds = latest.get("predictions", [])
-        edge_cases = [p.get("disease", "") for p in preds if p.get("is_edge_case")]
-        
+
         # Return PDF data for the latest diagnosis
         pdf_data = latest.get("pdf_data", "") if latest else ""
         pdf_filename = latest.get("pdf_filename", "prescription.pdf") if latest else "prescription.pdf"

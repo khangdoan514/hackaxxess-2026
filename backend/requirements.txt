@@ -11,9 +11,6 @@ numpy==2.2.0
 pandas==2.2.3
 kagglehub>=0.2.0
 
-# Whisper
-faster-whisper==1.0.3
-
 # MongoDB
 pymongo==4.10.1
 
@@ -21,3 +18,9 @@ pymongo==4.10.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 
+# Google Gemini (user-friendly diagnosis explanation)
+google-genai>=1.0.0
+
+
+# Whisper
+faster-whisper==1.0.3
