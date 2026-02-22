@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import Header from '../components/Header';
 import api from '../lib/api';
 
 export default function PatientDashboard() {
@@ -38,21 +39,13 @@ export default function PatientDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="flex justify-between items-center px-8 py-6 border-b border-gray-800">
-        <h1 className="text-2xl font-bold">My Health Dashboard</h1>
-        <div className="flex items-center gap-4">
-          <span className="text-gray-400">{user?.email}</span>
-          <button
-            onClick={logout}
-            className="rounded-lg border border-gray-600 px-4 py-2 text-sm hover:bg-gray-800"
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
+      <Header 
+        portalType="patient"
+        title="Patient Portal"
+      />
 
-      <div className="max-w-4xl mx-auto px-8 py-8">
+      <div className="max-w-4xl mx-auto px-3 py-4">
         {loading && (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>

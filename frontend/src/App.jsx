@@ -2,10 +2,10 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Login from './pages/Login';
+import DoctorDashboard from './pages/DoctorDashboard';
 import Record from './pages/Record';
 import Diagnosis from './pages/Diagnosis';
 import PatientDashboard from './pages/PatientDashboard';
-import Landing from './pages/Landing';
 import './App.css';
 
 function App() {
@@ -13,8 +13,18 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
+          
+          {/* Doctor Routes */}
+          <Route
+            path="/doctor"
+            element={
+              <ProtectedRoute role="doctor">
+                <DoctorDashboard />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/record"
             element={
@@ -32,6 +42,16 @@ function App() {
             }
           />
           <Route
+            path="/diagnosis/:id"
+            element={
+              <ProtectedRoute role="doctor">
+                <Diagnosis />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Patient Routes */}
+          <Route
             path="/dashboard"
             element={
               <ProtectedRoute role="patient">
@@ -39,7 +59,17 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="/patient/:id"
+            element={
+              <ProtectedRoute role="patient">
+                <PatientDashboard />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Fallback Route */}
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

@@ -12,8 +12,10 @@ export function ProtectedRoute({ children, role }) {
   if (!isAuthenticated || !user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
+
   if (role && user.role !== role) {
     return <Navigate to={user.role === 'doctor' ? '/record' : '/dashboard'} replace />;
   }
+  
   return children;
 }

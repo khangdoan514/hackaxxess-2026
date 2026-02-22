@@ -23,8 +23,13 @@ export function AuthProvider({ children }) {
     return data.user;
   }, []);
 
-  const signup = useCallback(async (email, password, role) => {
-    const { data } = await api.post('/auth/signup', { email, password, role });
+  const signup = useCallback(async (name, email, password, role) => {
+    const { data } = await api.post('/auth/signup', { 
+      name,  // Make sure name is being sent
+      email, 
+      password, 
+      role 
+    });
     localStorage.setItem('token', data.access_token);
     localStorage.setItem('user', JSON.stringify(data.user));
     setToken(data.access_token);
@@ -39,8 +44,39 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  // Helper to get display name
+  const getDisplayName = useCallback(() => {
+    if (!user) return '';
+    
+    if (user.role === 'doctor') {
+      // If we have a full name, extract the last name
+      if (user.name) {
+        const nameParts = user.name.trim().split(' ');
+        const lastName = nameParts[nameParts.length - 1];
+        return `Dr. ${lastName}`;
+      }
+      // Fallback to email prefix if no name
+      return `Dr. ${user.email?.split('@')[0] || 'Doctor'}`;
+    }
+    
+    // For patients, return full name
+    if (user.name) {
+      return user.name;
+    }
+    // Fallback to email prefix
+    return user.email?.split('@')[0] || 'Patient';
+  }, [user]);
+
   return (
-    <AuthContext.Provider value={{ user, token, login, signup, logout, isAuthenticated: !!token }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      token, 
+      login, 
+      signup, 
+      logout, 
+      isAuthenticated: !!token,
+      getDisplayName
+    }}>
       {children}
     </AuthContext.Provider>
   );

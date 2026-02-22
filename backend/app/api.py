@@ -1,12 +1,22 @@
+"""
+API route definitions: auth, record upload/transcribe, diagnosis analyze/confirm, patient.
+"""
 import logging
 import re
 import uuid
 from pathlib import Path
 from datetime import datetime
+import base64
+import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
+
+# PDF generation
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
 from config import DATA_DIR
 from auth import hash_password, verify_password, create_access_token, decode_access_token
@@ -67,6 +77,7 @@ def require_doctor(user=Depends(require_user)):
 
 
 class SignupInput(BaseModel):
+    name: str  # Make sure this field exists
     email: str
     password: str
     role: str = Field(..., pattern="^(doctor|patient)$")
@@ -116,12 +127,15 @@ class ConfirmInput(BaseModel):
     prescription: dict = Field(..., description="medication, dosage, instructions")
     symptoms: list[str] = Field(default_factory=list)
     predictions: list[dict] = Field(default_factory=list)
+    save_location: str = "desktop"  # desktop, downloads, custom
+    custom_filename: str | None = None
 
 
 class ConfirmResponse(BaseModel):
     success: bool
     diagnosis_id: str | None = None
     prescription_id: str | None = None
+    pdf_path: str | None = None
 
 
 class PatientTwinInput(BaseModel):
@@ -132,6 +146,14 @@ class PatientTwinInput(BaseModel):
 class PatientTwinResponse(BaseModel):
     success: bool
     patient_twin: dict
+
+
+class PDFGenerateInput(BaseModel):
+    patient_email: str
+    final_diagnosis: str
+    prescription: dict
+    symptoms: list[str] = Field(default_factory=list)
+    predictions: list[dict] = Field(default_factory=list)
 
 
 # ---------- Symptom extraction (simple keyword/pattern) ----------
@@ -169,33 +191,72 @@ def _symptom_text_for_vectorizer(symptoms: list[str]) -> str:
     return " ".join(symptoms) if symptoms else ""
 
 
-# ---------- Debug ----------
+# ---------- PDF Generation ----------
 
-
-@router.get("/debug/model")
-async def debug_model(request: Request):
-    """Check if model is loaded"""
-    model = get_model(request)
-    vectorizer = get_vectorizer(request)
+def generate_pdf(body: ConfirmInput, doctor_user):
+    """Generate PDF prescription"""
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
     
-    # Try a simple prediction
-    test_result = None
-    if model and vectorizer:
-        try:
-            test_symptoms = ["chest pain shortness of breath"]
-            X_test = vectorizer.transform(test_symptoms)
-            pred = model.predict(X_test)[0]
-            test_result = str(pred)
-        except Exception as e:
-            test_result = f"Error: {str(e)}"
+    # Header
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(50, height - 50, "Medical Prescription")
     
-    return {
-        "model_loaded": model is not None,
-        "vectorizer_loaded": vectorizer is not None,
-        "model_type": str(type(model)) if model else None,
-        "vectorizer_type": str(type(vectorizer)) if vectorizer else None,
-        "test_prediction": test_result
-    }
+    c.setFont("Helvetica", 12)
+    c.drawString(50, height - 80, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    c.drawString(50, height - 95, f"Doctor: {doctor_user.get('email', 'Unknown')}")
+    c.drawString(50, height - 110, f"Patient: {body.patient_email}")
+    
+    # Line
+    c.line(50, height - 120, width - 50, height - 120)
+    
+    # Diagnosis
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 150, "Diagnosis:")
+    c.setFont("Helvetica", 12)
+    c.drawString(70, height - 170, body.final_diagnosis)
+    
+    # Symptoms
+    y = height - 200
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "Symptoms:")
+    c.setFont("Helvetica", 12)
+    y -= 20
+    for symptom in body.symptoms[:5]:
+        c.drawString(70, y, f"• {symptom}")
+        y -= 15
+    
+    # Prescription
+    y -= 15
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "Prescription:")
+    y -= 20
+    c.setFont("Helvetica", 12)
+    c.drawString(70, y, f"Medication: {body.prescription.get('medication', 'N/A')}")
+    y -= 15
+    c.drawString(70, y, f"Dosage: {body.prescription.get('dosage', 'N/A')}")
+    y -= 15
+    c.drawString(70, y, f"Instructions: {body.prescription.get('instructions', 'N/A')}")
+    
+    # AI Predictions
+    y -= 30
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "AI Suggested Diagnoses:")
+    y -= 20
+    c.setFont("Helvetica", 10)
+    for pred in body.predictions[:3]:
+        confidence = pred.get('confidence', 0) * 100
+        c.drawString(70, y, f"• {pred.get('disease', 'Unknown')} ({confidence:.0f}% confidence)")
+        y -= 15
+    
+    # Footer
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(50, 50, "This is a computer-generated prescription. Valid with doctor's signature.")
+    
+    c.save()
+    buffer.seek(0)
+    return buffer
 
 
 # ---------- Auth routes ----------
@@ -213,17 +274,40 @@ async def auth_signup(body: SignupInput, request: Request):
     else:
         if body.email in _memory_users:
             raise HTTPException(400, "Email already registered")
+    
     user_id = str(uuid.uuid4())
     hashed = hash_password(body.password)
-    doc = {"id": user_id, "email": body.email, "hashed_password": hashed, "role": body.role}
+    
+    # Make sure to include the name in the user document
+    doc = {
+        "id": user_id, 
+        "name": body.name,  # Store the name
+        "email": body.email, 
+        "hashed_password": hashed, 
+        "role": body.role
+    }
+    
     if db is not None:
         db["users"].insert_one(doc)
     else:
         _memory_users[body.email] = doc
-    token = create_access_token({"sub": user_id, "email": body.email, "role": body.role})
+    
+    # Include name in the token and response
+    token = create_access_token({
+        "sub": user_id, 
+        "email": body.email, 
+        "role": body.role,
+        "name": body.name
+    })
+    
     return AuthResponse(
         access_token=token,
-        user={"id": user_id, "email": body.email, "role": body.role},
+        user={
+            "id": user_id, 
+            "email": body.email, 
+            "role": body.role,
+            "name": body.name
+        },
     )
 
 
@@ -235,14 +319,31 @@ async def auth_login(body: LoginInput, request: Request):
         user = db["users"].find_one({"email": body.email})
     else:
         user = _memory_users.get(body.email)
+    
     if not user or not verify_password(body.password, user.get("hashed_password", "")):
         raise HTTPException(401, "Invalid email or password")
+    
     user_id = user.get("id") or str(user.get("_id", ""))
     role = user.get("role", "patient")
-    token = create_access_token({"sub": user_id, "email": user["email"], "role": role})
+    name = user.get("name", "")  # Get the stored name
+    
+    print(f"User logged in: {body.email}, name: {name}")  # Debug log
+    
+    token = create_access_token({
+        "sub": user_id, 
+        "email": user["email"], 
+        "role": role,
+        "name": name  # Add name to token
+    })
+    
     return AuthResponse(
         access_token=token,
-        user={"id": user_id, "email": user["email"], "role": role},
+        user={
+            "id": user_id, 
+            "email": user["email"], 
+            "role": role,
+            "name": name
+        },
     )
 
 
@@ -295,12 +396,12 @@ async def record_transcribe(
         raise HTTPException(404, "Upload not found or expired")
     path_str = str(path)
     try:
-        from faster_whisper import WhisperModel
+        from faster_whisper import WhisperModel 
         model = WhisperModel("base", device="cpu", compute_type="int8")
         
         # Transcribe
         segments, info = model.transcribe(path_str)
-        print(f"✅ Detected language: {info.language}")
+        print(f"Detected language: {info.language}")
         
         # Fix: segments is an iterator, not a list of dicts
         transcript_parts = []
@@ -418,14 +519,26 @@ async def diagnosis_confirm(
     request: Request,
     user=Depends(require_doctor),
 ):
-    """Persist final diagnosis and prescription. Doctor enters patient email; stored under that patient's account."""
+    """Persist final diagnosis and prescription. NO PDF auto-save - just store in DB."""
     patient_id = _resolve_patient_id_by_email(request, body.patient_email)
     db = get_db(request)
+    
+    # Generate PDF for storage only (not for auto-save)
+    pdf_buffer = generate_pdf(body, user)
+    pdf_base64 = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
+    
+    # Generate filename for reference
+    patient_prefix = body.patient_email.split('@')[0]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    pdf_filename = f"prescription_{patient_prefix}_{timestamp}.pdf"
+    
+    # DON'T save to Desktop here - let frontend handle download
 
     if db is not None:
         try:
             diagnoses = db["diagnoses"]
             prescriptions = db["prescriptions"]
+            
             diagnosis_doc = {
                 "patient_id": patient_id,
                 "patient_email": body.patient_email.strip().lower(),
@@ -433,9 +546,13 @@ async def diagnosis_confirm(
                 "symptoms": body.symptoms,
                 "predictions": body.predictions,
                 "final_diagnosis": body.final_diagnosis,
+                "pdf_data": pdf_base64,
+                "pdf_filename": pdf_filename,
+                "created_at": datetime.now()
             }
             result = diagnoses.insert_one(diagnosis_doc)
             diagnosis_id = str(result.inserted_id)
+            
             prescription_doc = {
                 "patient_id": patient_id,
                 "diagnosis_id": diagnosis_id,
@@ -445,14 +562,20 @@ async def diagnosis_confirm(
             }
             pres_result = prescriptions.insert_one(prescription_doc)
             prescription_id = str(pres_result.inserted_id)
-            return ConfirmResponse(success=True, diagnosis_id=diagnosis_id, prescription_id=prescription_id)
+            
+            return ConfirmResponse(
+                success=True, 
+                diagnosis_id=diagnosis_id, 
+                prescription_id=prescription_id,
+                pdf_path=None  # No auto-save path
+            )
         except HTTPException:
             raise
         except Exception as e:
             logger.exception("Confirm failed: %s", e)
             raise HTTPException(500, f"Save failed: {e}")
 
-    # In-memory fallback (no MongoDB)
+    # In-memory fallback
     diagnosis_id = str(uuid.uuid4())
     diagnosis_doc = {
         "id": diagnosis_id,
@@ -460,6 +583,8 @@ async def diagnosis_confirm(
         "symptoms": body.symptoms,
         "predictions": body.predictions,
         "final_diagnosis": body.final_diagnosis,
+        "pdf_data": pdf_base64,
+        "pdf_filename": pdf_filename,
     }
     prescription_doc = {
         "id": str(uuid.uuid4()),
@@ -471,7 +596,46 @@ async def diagnosis_confirm(
     }
     _memory_diagnoses.setdefault(patient_id, []).append(diagnosis_doc)
     _memory_prescriptions.setdefault(patient_id, []).append(prescription_doc)
-    return ConfirmResponse(success=True, diagnosis_id=diagnosis_id, prescription_id=prescription_doc["id"])
+    return ConfirmResponse(
+        success=True, 
+        diagnosis_id=diagnosis_id, 
+        prescription_id=prescription_doc["id"],
+        pdf_path=None
+    )
+
+
+@router.post("/diagnosis/generate-pdf")
+async def generate_pdf_endpoint(
+    body: PDFGenerateInput,
+    request: Request,
+    user=Depends(require_doctor),
+):
+    """Generate PDF and return as download"""
+    try:
+        # Create a mock ConfirmInput object
+        class MockConfirmInput:
+            def __init__(self, body):
+                self.patient_email = body.patient_email
+                self.final_diagnosis = body.final_diagnosis
+                self.prescription = body.prescription
+                self.symptoms = body.symptoms
+                self.predictions = body.predictions
+        
+        mock_input = MockConfirmInput(body)
+        pdf_buffer = generate_pdf(mock_input, user)
+        
+        # Return PDF as download
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=prescription_{body.patient_email.split('@')[0]}.pdf"
+            }
+        )
+    except Exception as e:
+        logger.exception("PDF generation failed: %s", e)
+        raise HTTPException(500, f"PDF generation failed: {e}")
 
 
 @router.post("/diagnosis/patient-twin", response_model=PatientTwinResponse)
@@ -516,7 +680,7 @@ async def generate_patient_twin(
                 ]
                 
                 # Calculate risk score
-                top_prob = probs[top_indices[0]] if top_indices.size > 0 else 0
+                top_prob = probs[top_indices[0]] if len(top_indices) > 0 else 0
                 if top_prob > 0.7 or len(symptoms) >= 4:
                     risk_score = "HIGH"
                 elif top_prob > 0.4 or len(symptoms) >= 2:
@@ -620,19 +784,30 @@ async def patient_get(
         def doc_to_dict(d):
             out = dict(d)
             out["id"] = str(out.pop("_id", ""))
+            # Convert ObjectId to string for pdf_data if needed
+            if "pdf_data" in out and not isinstance(out["pdf_data"], str):
+                out["pdf_data"] = str(out["pdf_data"])
             return out
+        
         diagnoses = [doc_to_dict(d) for d in diagnoses]
         prescriptions = [doc_to_dict(d) for d in prescriptions]
         latest = diagnoses[0] if diagnoses else {}
         explanation = latest.get("final_diagnosis", "") or ""
         preds = latest.get("predictions", [])
         edge_cases = [p.get("disease", "") for p in preds if p.get("is_edge_case")]
+        
+        # Return PDF data for the latest diagnosis
+        pdf_data = latest.get("pdf_data", "") if latest else ""
+        pdf_filename = latest.get("pdf_filename", "prescription.pdf") if latest else "prescription.pdf"
+        
         return {
             "patient_id": patient_id,
             "diagnoses": diagnoses,
             "prescriptions": prescriptions,
             "explanation": explanation,
             "edge_cases": edge_cases,
+            "pdf_data": pdf_data,
+            "pdf_filename": pdf_filename
         }
     except Exception as e:
         logger.exception("Patient get failed: %s", e)

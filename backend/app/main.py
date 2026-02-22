@@ -1,13 +1,11 @@
 from contextlib import asynccontextmanager
 import logging
 import os
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 import uvicorn
-
 from config import MODEL_PATH, VECTORIZER_PATH, MONGO_URI, DB_NAME
 from api import router as api_router
 
@@ -15,15 +13,15 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"}
 
-
 class EnsureCORSHeadersMiddleware(BaseHTTPMiddleware):
-    """Ensure CORS headers are on every response so browser never blocks on missing header."""
+    """Ensures CORS headers are on every response so the browser never blocks on a missing header."""
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         origin = request.headers.get("origin")
         if origin and (origin in ALLOWED_ORIGINS or "localhost" in origin or "127.0.0.1" in origin):
             response.headers.setdefault("Access-Control-Allow-Origin", origin)
             response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+
         return response
 
 def load_ml_artifacts():
@@ -35,18 +33,22 @@ def load_ml_artifacts():
             with open(MODEL_PATH, "rb") as f:
                 model = pickle.load(f)
             logger.info("Loaded KNN model from %s", MODEL_PATH)
+
         else:
             logger.warning("Model file not found at %s; run training script first.", MODEL_PATH)
+
         if VECTORIZER_PATH.exists():
             with open(VECTORIZER_PATH, "rb") as f:
                 vectorizer = pickle.load(f)
             logger.info("Loaded vectorizer from %s", VECTORIZER_PATH)
+
         else:
             logger.warning("Vectorizer file not found at %s; run training script first.", VECTORIZER_PATH)
+
     except Exception as e:
         logger.exception("Failed to load ML artifacts: %s", e)
-    return model, vectorizer
 
+    return model, vectorizer
 
 def connect_mongo():
     """Connect to MongoDB and return (db, client)."""
@@ -57,10 +59,10 @@ def connect_mongo():
         client.admin.command("ping")
         logger.info("Connected to MongoDB (db=%s)", DB_NAME)
         return database, client
+
     except Exception as e:
         logger.warning("MongoDB connection failed: %s; API may still work with stub.", e)
         return None, None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -74,16 +76,16 @@ async def lifespan(app: FastAPI):
     if mongo_client:
         mongo_client.close()
 
-
 app = FastAPI(
-    title="HackAxxess :D",
+    title="Diffinitive",
+    description="AI-Powered Diagnostic Assistant",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
 
-# Add first so it runs last on response (ensures CORS headers even on errors)
+# Added first so it runs last on response, ensuring CORS headers even on errors
 app.add_middleware(EnsureCORSHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -97,20 +99,22 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api", tags=["api"])
 
-
 @app.get("/")
 async def root():
-    return {"message": "HackAxxess API"}
-
+    return {
+        "name": "Diffinitive",
+        "version": "1.0.0",
+        "status": "running",
+        "message": "AI-Powered Diagnostic Assistant API"
+    }
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
-
 @app.get("/health/env")
 async def health_env():
-    """Check that env is loaded; report which vars are set (no secret values)."""
+    """Check that env is loaded; reports which vars are set without exposing values."""
     from app import config
     return {
         "status": "ok",
@@ -141,7 +145,6 @@ async def main():
     )
     server = uvicorn.Server(config)
     await server.serve()
-
 
 if __name__ == "__main__":
     import asyncio
