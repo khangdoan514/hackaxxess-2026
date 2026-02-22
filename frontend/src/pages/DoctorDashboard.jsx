@@ -19,7 +19,8 @@ import {
   AlertCircle,
   Bell,
   User,
-  LogOut
+  LogOut,
+	ChevronRight
 } from 'lucide-react';
 
 export default function DoctorDashboard() {

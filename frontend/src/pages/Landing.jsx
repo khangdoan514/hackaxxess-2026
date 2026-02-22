@@ -16,15 +16,15 @@ export default function Landing() {
 
         <div className="grid md:grid-cols-3 gap-8 mb-16">
           <FeatureCard
-            title="🎤 Speech Recognition"
+            title="Speech Recognition"
             description="Convert conversations to text using Whisper AI"
           />
           <FeatureCard
-            title="🧠 AI Analysis"
+            title="AI Analysis"
             description="Extract symptoms and predict diseases with KNN"
           />
           <FeatureCard
-            title="👥 Patient Twin"
+            title="Patient Twin"
             description="Generate patient-friendly summaries and QR codes"
           />
         </div>
