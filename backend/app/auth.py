@@ -1,21 +1,27 @@
 """JWT and password hashing for auth."""
+import hashlib
 from datetime import datetime, timedelta
 from typing import Any
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.config import JWT_ALGORITHM, JWT_EXPIRE_MINUTES, JWT_SECRET
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Bcrypt accepts at most 72 bytes. Pre-hash with SHA256 so we always pass 64 bytes (hex) to bcrypt.
+def _prepare_for_bcrypt(password: str) -> bytes:
+    h = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return h.encode("ascii")
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    data = _prepare_for_bcrypt(password)
+    return bcrypt.hashpw(data, bcrypt.gensalt()).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    data = _prepare_for_bcrypt(plain)
+    return bcrypt.checkpw(data, hashed.encode("ascii"))
 
 
 def create_access_token(data: dict[str, Any]) -> str:

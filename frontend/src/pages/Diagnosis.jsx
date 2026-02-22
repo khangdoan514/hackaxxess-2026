@@ -3,24 +3,27 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../lib/api';
 
+const STUB_TRANSCRIPT_MSG = '[Stub transcript: install faster-whisper and add audio]';
+
 export default function Diagnosis() {
   const location = useLocation();
   const { transcript: initialTranscript } = location.state || {};
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
-  const [transcript, setTranscript] = useState(initialTranscript || '');
+  const normalizedInitial = (initialTranscript && initialTranscript !== STUB_TRANSCRIPT_MSG) ? initialTranscript : '';
+  const [transcript, setTranscript] = useState(normalizedInitial);
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [patientId, setPatientId] = useState('');
+  const [patientEmail, setPatientEmail] = useState('');
   const [finalDiagnosis, setFinalDiagnosis] = useState('');
   const [prescription, setPrescription] = useState({ medication: '', dosage: '', instructions: '' });
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
 
   useEffect(() => {
-    if (initialTranscript) setTranscript(initialTranscript);
+    if (initialTranscript && initialTranscript !== STUB_TRANSCRIPT_MSG) setTranscript(initialTranscript);
   }, [initialTranscript]);
 
   const runAnalysis = async () => {
@@ -39,15 +42,15 @@ export default function Diagnosis() {
 
   const confirmDiagnosis = async (e) => {
     e.preventDefault();
-    if (!patientId.trim() || !finalDiagnosis.trim()) {
-      setError('Patient ID and final diagnosis required');
+    if (!patientEmail.trim() || !finalDiagnosis.trim()) {
+      setError('Patient email and final diagnosis required');
       return;
     }
     setConfirmLoading(true);
     setError('');
     try {
       await api.post('/diagnosis/confirm', {
-        patient_id: patientId.trim(),
+        patient_email: patientEmail.trim(),
         final_diagnosis: finalDiagnosis.trim(),
         prescription: prescription,
         symptoms: analysis?.symptoms || [],
@@ -62,33 +65,33 @@ export default function Diagnosis() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <header className="flex justify-between items-center mb-8">
-        <h1 className="text-xl font-bold">Diagnosis</h1>
+    <div className="min-h-screen bg-gray-900 text-white">
+      <header className="flex justify-between items-center px-8 py-6 border-b border-gray-800">
+        <h1 className="text-2xl font-bold">Diagnosis</h1>
         <div className="flex items-center gap-4">
           <span className="text-gray-400">{user?.email}</span>
           <button
             onClick={() => navigate('/record')}
-            className="rounded-lg border border-gray-600 px-3 py-1.5 text-sm hover:bg-gray-800"
+            className="rounded-lg border border-gray-600 px-4 py-2 text-sm hover:bg-gray-800"
           >
             New record
           </button>
           <button
             onClick={logout}
-            className="rounded-lg border border-gray-600 px-3 py-1.5 text-sm hover:bg-gray-800"
+            className="rounded-lg border border-gray-600 px-4 py-2 text-sm hover:bg-gray-800"
           >
             Logout
           </button>
         </div>
       </header>
 
-      <div className="max-w-3xl mx-auto space-y-6">
-        <div className="rounded-xl bg-gray-800 p-6">
-          <h2 className="font-semibold mb-2">Transcript</h2>
+      <div className="max-w-4xl mx-auto px-8 py-8 space-y-8">
+        <div className="rounded-xl bg-gray-800 p-8">
+          <h2 className="font-semibold text-lg mb-3">Transcript</h2>
           <textarea
             value={transcript}
             onChange={(e) => setTranscript(e.target.value)}
-            rows={4}
+            rows={6}
             className="w-full rounded-lg border border-gray-600 bg-gray-700 text-white px-3 py-2"
             placeholder="Paste or type transcript..."
           />
@@ -105,12 +108,12 @@ export default function Diagnosis() {
 
         {analysis && (
           <>
-            <div className="rounded-xl bg-gray-800 p-6">
-              <h2 className="font-semibold mb-2">Extracted symptoms</h2>
+            <div className="rounded-xl bg-gray-800 p-8">
+              <h2 className="font-semibold text-lg mb-3">Extracted symptoms</h2>
               <p className="text-gray-300">{analysis.symptoms?.join(', ') || 'None'}</p>
             </div>
-            <div className="rounded-xl bg-gray-800 p-6">
-              <h2 className="font-semibold mb-2">Predictions (common vs edge)</h2>
+            <div className="rounded-xl bg-gray-800 p-8">
+              <h2 className="font-semibold text-lg mb-3">Predictions (common vs edge)</h2>
               <p className="text-gray-400 text-sm mb-2">Common: {analysis.common?.join(', ') || '—'}</p>
               <p className="text-gray-400 text-sm">Edge cases: {analysis.edge_cases?.join(', ') || '—'}</p>
               <ul className="mt-2 space-y-1">
@@ -124,18 +127,19 @@ export default function Diagnosis() {
             </div>
 
             {!confirmSuccess ? (
-              <form onSubmit={confirmDiagnosis} className="rounded-xl bg-gray-800 p-6 space-y-4">
-                <h2 className="font-semibold">Confirm diagnosis & prescription</h2>
+              <form onSubmit={confirmDiagnosis} className="rounded-xl bg-gray-800 p-8 space-y-5">
+                <h2 className="font-semibold text-lg">Confirm diagnosis & prescription</h2>
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Patient ID</label>
+                  <label className="block text-sm text-gray-400 mb-1">Patient email</label>
                   <input
-                    type="text"
-                    value={patientId}
-                    onChange={(e) => setPatientId(e.target.value)}
+                    type="email"
+                    value={patientEmail}
+                    onChange={(e) => setPatientEmail(e.target.value)}
                     required
                     className="w-full rounded-lg border border-gray-600 bg-gray-700 text-white px-3 py-2"
-                    placeholder="Patient ID"
+                    placeholder="patient@example.com"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Diagnosis will appear on the patient&apos;s dashboard when they log in.</p>
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Final diagnosis</label>
@@ -187,7 +191,7 @@ export default function Diagnosis() {
                 </button>
               </form>
             ) : (
-              <div className="rounded-xl bg-gray-800 p-6">
+              <div className="rounded-xl bg-gray-800 p-8">
                 <p className="text-green-400 font-medium">Diagnosis and prescription saved.</p>
                 <button
                   onClick={() => navigate('/record')}

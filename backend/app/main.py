@@ -4,12 +4,27 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 import uvicorn
 
 from app.config import MODEL_PATH, VECTORIZER_PATH, MONGO_URI, DB_NAME
 from app.api import router as api_router
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"}
+
+
+class EnsureCORSHeadersMiddleware(BaseHTTPMiddleware):
+    """Ensure CORS headers are on every response so browser never blocks on missing header."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        origin = request.headers.get("origin")
+        if origin and (origin in ALLOWED_ORIGINS or "localhost" in origin or "127.0.0.1" in origin):
+            response.headers.setdefault("Access-Control-Allow-Origin", origin)
+            response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        return response
 
 def load_ml_artifacts():
     """Load KNN model and vectorizer from disk. Graceful if missing (e.g. before training)."""
@@ -68,14 +83,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add first so it runs last on response (ensures CORS headers even on errors)
+app.add_middleware(EnsureCORSHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=list(ALLOWED_ORIGINS),
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],

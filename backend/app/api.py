@@ -21,6 +21,12 @@ security = HTTPBearer(auto_error=False)
 # In-memory store for upload session id -> temp file path (fallback when no disk write yet)
 _upload_paths: dict[str, str] = {}
 
+# In-memory fallback for auth when MongoDB is not connected (dev only; lost on restart)
+_memory_users: dict[str, dict] = {}
+# In-memory diagnoses/prescriptions keyed by patient_id when MongoDB is not connected
+_memory_diagnoses: dict[str, list] = {}
+_memory_prescriptions: dict[str, list] = {}
+
 
 def get_model(request: Request):
     return getattr(request.app.state, "model", None)
@@ -83,9 +89,13 @@ class TranscribeInput(BaseModel):
     upload_id: str = Field(..., description="Id returned from POST /record/upload")
 
 
+STUB_TRANSCRIPT_MESSAGE = "[Stub transcript: install faster-whisper and add audio]"
+
+
 class TranscribeResponse(BaseModel):
     transcript: str
     upload_id: str
+    is_stub: bool = False
 
 
 class AnalyzeInput(BaseModel):
@@ -102,7 +112,7 @@ class AnalyzeResponse(BaseModel):
 
 
 class ConfirmInput(BaseModel):
-    patient_id: str
+    patient_email: str = Field(..., description="Patient's email; diagnosis will show on their dashboard when they log in")
     session_id: str | None = None
     final_diagnosis: str
     prescription: dict = Field(..., description="medication, dosage, instructions")
@@ -132,6 +142,8 @@ SYMPTOM_KEYWORDS = [
 def extract_symptoms_from_transcript(transcript: str) -> list[str]:
     """Extract a list of symptom strings from transcript text (simple keyword + phrase matching)."""
     if not transcript or not transcript.strip():
+        return []
+    if STUB_TRANSCRIPT_MESSAGE in transcript or transcript.strip() == STUB_TRANSCRIPT_MESSAGE:
         return []
     text = transcript.lower().strip()
     found = set()
@@ -222,30 +234,47 @@ async def record_upload(
         raise HTTPException(500, "Upload failed")
 
 
+def _find_upload_path(upload_id: str) -> Path | None:
+    """Get path to uploaded audio; check _upload_paths first, then DATA_DIR (for multi-worker)."""
+    path_str = _upload_paths.get(upload_id)
+    if path_str and Path(path_str).exists():
+        return Path(path_str)
+    # Fallback: file may have been written by another worker; find by pattern in DATA_DIR
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for p in DATA_DIR.glob(f"upload_{upload_id}.*"):
+        if p.is_file():
+            return p
+    return None
+
+
 @router.post("/record/transcribe", response_model=TranscribeResponse)
 async def record_transcribe(
     body: TranscribeInput,
     user=Depends(require_doctor),
 ):
     """Transcribe uploaded audio using Whisper. Returns transcript."""
-    path_str = _upload_paths.get(body.upload_id)
-    if not path_str or not Path(path_str).exists():
+    path = _find_upload_path(body.upload_id)
+    if path is None:
         raise HTTPException(404, "Upload not found or expired")
+    path_str = str(path)
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel("large-v3", device="cpu", compute_type="int8")
         segments, _ = model.transcribe(path_str)
-        transcript = " ".join(s["text"] for s in segments).strip()
+        transcript = " ".join(s["text"] for s in segments).strip() or "[No speech detected]"
         try:
-            Path(path_str).unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
         except Exception:
             pass
         _upload_paths.pop(body.upload_id, None)
         return TranscribeResponse(transcript=transcript, upload_id=body.upload_id)
     except ImportError:
         # Stub when faster_whisper not installed or failing
-        transcript = "[Stub transcript: install faster-whisper and add audio]"
-        return TranscribeResponse(transcript=transcript, upload_id=body.upload_id)
+        return TranscribeResponse(
+            transcript=STUB_TRANSCRIPT_MESSAGE,
+            upload_id=body.upload_id,
+            is_stub=True,
+        )
     except Exception as e:
         logger.exception("Transcribe failed: %s", e)
         raise HTTPException(500, f"Transcription failed: {e}")
@@ -307,42 +336,81 @@ async def diagnosis_analyze(
         raise HTTPException(500, f"Analysis failed: {e}")
 
 
+def _resolve_patient_id_by_email(request: Request, patient_email: str) -> str:
+    """Resolve patient email to user id (from DB or in-memory). Raises HTTPException if not found."""
+    db = get_db(request)
+    email_lower = patient_email.strip().lower()
+    if db is not None:
+        user = db["users"].find_one({"email": {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}})
+        if not user:
+            raise HTTPException(400, "No patient found with that email. Patient must sign up first.")
+        return user.get("id") or str(user.get("_id", ""))
+    for email, u in _memory_users.items():
+        if email.lower() == email_lower:
+            return u.get("id", "")
+    raise HTTPException(400, "No patient found with that email. Patient must sign up first.")
+
+
 @router.post("/diagnosis/confirm", response_model=ConfirmResponse)
 async def diagnosis_confirm(
     body: ConfirmInput,
     request: Request,
     user=Depends(require_doctor),
 ):
-    """Persist final diagnosis and prescription to MongoDB."""
+    """Persist final diagnosis and prescription. Doctor enters patient email; stored under that patient's account."""
+    patient_id = _resolve_patient_id_by_email(request, body.patient_email)
     db = get_db(request)
-    if db is None:
-        return ConfirmResponse(success=False, diagnosis_id=None, prescription_id=None)
 
-    try:
-        diagnoses = db["diagnoses"]
-        prescriptions = db["prescriptions"]
-        diagnosis_doc = {
-            "patient_id": body.patient_id,
-            "session_id": body.session_id,
-            "symptoms": body.symptoms,
-            "predictions": body.predictions,
-            "final_diagnosis": body.final_diagnosis,
-        }
-        result = diagnoses.insert_one(diagnosis_doc)
-        diagnosis_id = str(result.inserted_id)
-        prescription_doc = {
-            "patient_id": body.patient_id,
-            "diagnosis_id": diagnosis_id,
-            "medication": body.prescription.get("medication", ""),
-            "dosage": body.prescription.get("dosage", ""),
-            "instructions": body.prescription.get("instructions", ""),
-        }
-        pres_result = prescriptions.insert_one(prescription_doc)
-        prescription_id = str(pres_result.inserted_id)
-        return ConfirmResponse(success=True, diagnosis_id=diagnosis_id, prescription_id=prescription_id)
-    except Exception as e:
-        logger.exception("Confirm failed: %s", e)
-        raise HTTPException(500, f"Save failed: {e}")
+    if db is not None:
+        try:
+            diagnoses = db["diagnoses"]
+            prescriptions = db["prescriptions"]
+            diagnosis_doc = {
+                "patient_id": patient_id,
+                "patient_email": body.patient_email.strip().lower(),
+                "session_id": body.session_id,
+                "symptoms": body.symptoms,
+                "predictions": body.predictions,
+                "final_diagnosis": body.final_diagnosis,
+            }
+            result = diagnoses.insert_one(diagnosis_doc)
+            diagnosis_id = str(result.inserted_id)
+            prescription_doc = {
+                "patient_id": patient_id,
+                "diagnosis_id": diagnosis_id,
+                "medication": body.prescription.get("medication", ""),
+                "dosage": body.prescription.get("dosage", ""),
+                "instructions": body.prescription.get("instructions", ""),
+            }
+            pres_result = prescriptions.insert_one(prescription_doc)
+            prescription_id = str(pres_result.inserted_id)
+            return ConfirmResponse(success=True, diagnosis_id=diagnosis_id, prescription_id=prescription_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Confirm failed: %s", e)
+            raise HTTPException(500, f"Save failed: {e}")
+
+    # In-memory fallback (no MongoDB)
+    diagnosis_id = str(uuid.uuid4())
+    diagnosis_doc = {
+        "id": diagnosis_id,
+        "patient_id": patient_id,
+        "symptoms": body.symptoms,
+        "predictions": body.predictions,
+        "final_diagnosis": body.final_diagnosis,
+    }
+    prescription_doc = {
+        "id": str(uuid.uuid4()),
+        "patient_id": patient_id,
+        "diagnosis_id": diagnosis_id,
+        "medication": body.prescription.get("medication", ""),
+        "dosage": body.prescription.get("dosage", ""),
+        "instructions": body.prescription.get("instructions", ""),
+    }
+    _memory_diagnoses.setdefault(patient_id, []).append(diagnosis_doc)
+    _memory_prescriptions.setdefault(patient_id, []).append(prescription_doc)
+    return ConfirmResponse(success=True, diagnosis_id=diagnosis_id, prescription_id=prescription_doc["id"])
 
 
 @router.get("/patient/{patient_id}")
@@ -356,12 +424,17 @@ async def patient_get(
         raise HTTPException(403, "Can only view own dashboard")
     db = get_db(request)
     if db is None:
+        diagnoses = _memory_diagnoses.get(patient_id, [])
+        prescriptions = _memory_prescriptions.get(patient_id, [])
+        latest = diagnoses[0] if diagnoses else {}
+        preds = latest.get("predictions", [])
+        edge_cases = [p.get("disease", "") for p in preds if p.get("is_edge_case")]
         return {
             "patient_id": patient_id,
-            "diagnoses": [],
-            "prescriptions": [],
-            "explanation": "",
-            "edge_cases": [],
+            "diagnoses": diagnoses,
+            "prescriptions": prescriptions,
+            "explanation": latest.get("final_diagnosis", "") or "",
+            "edge_cases": edge_cases,
         }
 
     try:

@@ -39,8 +39,8 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4">
-      <div className="w-full max-w-md rounded-xl bg-gray-800 p-8 shadow-xl">
+    <div className="min-h-screen flex items-center justify-center bg-gray-900 px-8 py-12">
+      <div className="w-full max-w-lg rounded-xl bg-gray-800 p-10 shadow-xl">
         <h1 className="text-2xl font-bold text-white mb-6 text-center">
           {isSignup ? 'Create account' : 'Sign in'}
         </h1>
