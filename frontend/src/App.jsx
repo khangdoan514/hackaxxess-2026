@@ -8,6 +8,7 @@ import Diagnosis from './pages/Diagnosis';
 import PatientDashboard from './pages/PatientDashboard';
 import PatientProfile from './pages/PatientProfile';
 import PatientAppointments from './pages/PatientAppointments';
+import Appointment from './pages/Appointment';
 import './App.css';
 
 function App() {
