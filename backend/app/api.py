@@ -172,6 +172,35 @@ def _symptom_text_for_vectorizer(symptoms: list[str]) -> str:
     return " ".join(symptoms) if symptoms else ""
 
 
+# ---------- Debug ----------
+
+
+@router.get("/debug/model")
+async def debug_model(request: Request):
+    """Check if model is loaded"""
+    model = get_model(request)
+    vectorizer = get_vectorizer(request)
+    
+    # Try a simple prediction
+    test_result = None
+    if model and vectorizer:
+        try:
+            test_symptoms = ["chest pain shortness of breath"]
+            X_test = vectorizer.transform(test_symptoms)
+            pred = model.predict(X_test)[0]
+            test_result = str(pred)
+        except Exception as e:
+            test_result = f"Error: {str(e)}"
+    
+    return {
+        "model_loaded": model is not None,
+        "vectorizer_loaded": vectorizer is not None,
+        "model_type": str(type(model)) if model else None,
+        "vectorizer_type": str(type(vectorizer)) if vectorizer else None,
+        "test_prediction": test_result
+    }
+
+
 # ---------- Auth routes ----------
 
 
