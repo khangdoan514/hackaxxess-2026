@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import CornerNav from '../components/CornerNav';
 import api from '../lib/api';
 
 export default function PatientDashboard() {
@@ -24,6 +25,9 @@ export default function PatientDashboard() {
   if (!patientId) {
     return (
       <div className="min-h-screen bg-gray-900 text-white px-8 py-8">
+        <div className="flex items-center border-b border-gray-800 pb-4 mb-4">
+          <CornerNav />
+        </div>
         <p className="text-gray-400">Not logged in as patient.</p>
       </div>
     );
@@ -32,7 +36,10 @@ export default function PatientDashboard() {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="flex justify-between items-center px-8 py-6 border-b border-gray-800">
-        <h1 className="text-2xl font-bold">My dashboard</h1>
+        <div className="flex items-center gap-4">
+          <CornerNav />
+          <h1 className="text-2xl font-bold">My dashboard</h1>
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-gray-400">{user?.email}</span>
           <button

@@ -1,30 +1,10 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import CornerNav from '../components/CornerNav';
+import api from '../lib/api';
 
-const SAMPLE_TRANSCRIPT = `Good morning. What brings you in today?
-
-For the past week, I've been getting this heavy pressure in my chest whenever I walk fast or climb stairs at work. It feels tight, and sometimes it spreads to my left arm. I also get short of breath and sweaty when it happens. I have to stop and rest, and after a few minutes it goes away.
-
-When did this start?
-
-About a week ago. I've never had this before.
-
-Do you have any medical conditions?
-
-I have high blood pressure, and I take Lisinopril. I was also prescribed cholesterol medication, but I stopped taking it because it caused muscle pain.
-
-Do you smoke?
-
-I used to. I quit 10 years ago, but I smoked for about 20 years before that.
-
-Any family history of heart problems?
-
-Yes. My dad had a heart attack at 62, and my brother had one at 60.
-
-Thank you for telling me. We need to evaluate your heart. I'm going to order some tests like an ECG, blood work, and possibly a stress test to find out what's causing this.
-
-Okay. Thank you.`;
+const STUB_TRANSCRIPT_MSG = '[Stub transcript: install faster-whisper and add audio]';
 
 export default function Record() {
   const [recording, setRecording] = useState(false);
@@ -46,11 +26,31 @@ export default function Record() {
       recorder.ondataavailable = (e) => {
         if (e.data.size) chunksRef.current.push(e.data);
       };
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        setLoading(true);
         setError('');
         setShowTranscriptSection(true);
-        setTranscript(SAMPLE_TRANSCRIPT);
+        try {
+          const form = new FormData();
+          form.append('file', blob, 'recording.webm');
+          const { data } = await api.post('/record/upload', form, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          setUploadId(data.upload_id);
+          const trans = await api.post('/record/transcribe', { upload_id: data.upload_id });
+          const isStub = trans.data?.is_stub === true;
+          const raw = trans.data?.transcript ?? '';
+          const text = isStub || raw === STUB_TRANSCRIPT_MSG ? '' : (raw || '[No speech detected]');
+          setTranscript(text);
+        } catch (err) {
+          const msg = err.response?.data?.detail ?? err.message ?? 'Upload/transcribe failed';
+          setError(Array.isArray(msg) ? msg.join(' ') : msg);
+          setTranscript('');
+        } finally {
+          setLoading(false);
+        }
       };
       recorder.start();
       mediaRecorderRef.current = recorder;
@@ -74,7 +74,10 @@ export default function Record() {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="flex justify-between items-center px-8 py-6 border-b border-gray-800">
-        <h1 className="text-2xl font-bold">Record consultation</h1>
+        <div className="flex items-center gap-4">
+          <CornerNav />
+          <h1 className="text-2xl font-bold">Record consultation</h1>
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-gray-400">{user?.email}</span>
           <button

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import CornerNav from '../components/CornerNav';
 import api from '../lib/api';
 
 const STUB_TRANSCRIPT_MSG = '[Stub transcript: install faster-whisper and add audio]';
@@ -67,7 +68,10 @@ export default function Diagnosis() {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="flex justify-between items-center px-8 py-6 border-b border-gray-800">
-        <h1 className="text-2xl font-bold">Diagnosis</h1>
+        <div className="flex items-center gap-4">
+          <CornerNav />
+          <h1 className="text-2xl font-bold">Diagnosis</h1>
+        </div>
         <div className="flex items-center gap-4">
           <span className="text-gray-400">{user?.email}</span>
           <button
