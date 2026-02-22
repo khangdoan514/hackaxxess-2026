@@ -79,35 +79,27 @@ export default function Header({
     navigate('/login');
   };
 
-  // Function to check if a nav item is active
-  const isActive = (path) => {
-    return location.pathname === path;
-  };
-
-  const navItems = [
-    { 
-      icon: <LayoutDashboard className="w-4 h-4" />,
-      label: 'Dashboard',
-      path: '/doctor',
-    },
-    { 
-      icon: <Calendar className="w-4 h-4" />,
-      label: 'Appointment',
-      path: '/appointments',
-    },
-    { 
-      icon: <User className="w-4 h-4" />,
-      label: 'Profile',
-      path: '/profile',
-    }
+  const doctorNavItems = [
+    { icon: <LayoutDashboard className="w-4 h-4" />, label: 'Dashboard', path: '/doctor', active: location.pathname === '/doctor' },
+    { icon: <Calendar className="w-4 h-4" />, label: 'Appointments', path: '/appointments', active: location.pathname === '/appointments' },
+    { icon: <User className="w-4 h-4" />, label: 'Profile', path: '/profile', active: location.pathname === '/profile' },
   ];
+  const patientNavItems = [
+    { icon: <LayoutDashboard className="w-4 h-4" />, label: 'Dashboard', path: '/dashboard', active: location.pathname === '/dashboard' },
+    { icon: <User className="w-4 h-4" />, label: 'Profile', path: '/profile', active: location.pathname === '/profile' },
+    { icon: <Calendar className="w-4 h-4" />, label: 'Appointments', path: '/appointments', active: location.pathname === '/appointments' },
+  ];
+  const navItems = portalType === 'patient' ? patientNavItems : doctorNavItems;
+  const dashboardPath = portalType === 'patient' ? '/dashboard' : '/doctor';
+
+  const goToDashboard = () => navigate(dashboardPath);
 
   return (
     <header className="bg-white/5 backdrop-blur-md border-b border-white/10 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3">
         <div className="flex justify-between items-center h-16">
           
-          {/* Left section */}
+          {/* Left section - logo and title clickable to dashboard */}
           <div className="flex items-center space-x-3">
             {showBack && (
               <button
@@ -117,17 +109,24 @@ export default function Header({
                 <ChevronLeft className="w-5 h-5 text-gray-400" />
               </button>
             )}
-            {colors.icon}
-            <h1 className="text-xl font-bold text-white">Diffinitive</h1>
-            <span className={`${colors.badgeBg} ${colors.text} text-xs px-2 py-1 rounded-full border ${colors.border} hidden sm:inline-block`}>
-              {title || portalType.charAt(0).toUpperCase() + portalType.slice(1) + ' Portal'}
-            </span>
+            <button
+              type="button"
+              onClick={goToDashboard}
+              className="flex items-center space-x-3 rounded-lg hover:bg-white/10 transition-colors px-1 py-1 -mx-1"
+              aria-label="Go to dashboard"
+            >
+              {colors.icon}
+              <h1 className="text-xl font-bold text-white">Diffinitive</h1>
+              <span className={`${colors.badgeBg} ${colors.text} text-xs px-2 py-1 rounded-full border ${colors.border} hidden sm:inline-block`}>
+                {title || portalType.charAt(0).toUpperCase() + portalType.slice(1) + ' Portal'}
+              </span>
+            </button>
           </div>
 
           {/* Center Navigation - with active highlighting */}
           <nav className="absolute left-1/2 transform -translate-x-1/2 hidden md:flex items-center space-x-1">
             {navItems.map((item, index) => {
-              const active = isActive(item.path);
+              const active = item.active;
               return (
                 <button
                   key={index}
