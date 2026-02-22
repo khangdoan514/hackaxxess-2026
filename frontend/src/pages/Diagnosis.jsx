@@ -17,7 +17,9 @@ import {
   Pill,
   AlertTriangle,
   HeartPulse,
-  Shield
+  Shield,
+  Plus,
+  X
 } from 'lucide-react';
 
 const STUB_TRANSCRIPT_MSG = '[Stub transcript: install faster-whisper and add audio]';
@@ -37,6 +39,8 @@ export default function Diagnosis() {
   const [patientEmail, setPatientEmail] = useState('');
   const [finalDiagnosis, setFinalDiagnosis] = useState('');
   const [prescription, setPrescription] = useState({ medication: '', dosage: '', instructions: '' });
+  const [edgeCases, setEdgeCases] = useState([]);
+  const [edgeCaseInput, setEdgeCaseInput] = useState('');
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'clinical', 'prescribe'
@@ -65,6 +69,13 @@ export default function Diagnosis() {
           
           setPatientTwin(twinResponse.data.patient_twin);
           setAnalysis(analysisResponse.data);
+          // Initialize edge cases from AI analysis (doctor can add/remove and set further steps later)
+          const fromAnalysis = analysisResponse.data?.edge_cases || [];
+          const fromTwin = (twinResponse.data.patient_twin?.diagnosis_predictions || [])
+            .filter((p) => p.is_edge_case && p.disease)
+            .map((p) => p.disease);
+          const combined = [...new Set([...fromAnalysis, ...fromTwin])].map((name) => ({ name, further_steps: '' }));
+          setEdgeCases(combined);
         } catch (err) {
           setError(err.response?.data?.detail || err.message || 'Analysis failed');
         } finally {
@@ -100,8 +111,9 @@ export default function Diagnosis() {
         prescription: prescription,
         symptoms: analysis?.symptoms || patientTwin?.extracted_symptoms?.map(s => s.symptom) || [],
         predictions: analysis?.predictions || patientTwin?.diagnosis_predictions || [],
+        edge_cases: edgeCases,
       });
-      
+
       // Generate PDF and trigger download with Save As dialog
       const pdfResponse = await api.post('/diagnosis/generate-pdf', {
         patient_email: patientEmail.trim(),
@@ -109,6 +121,7 @@ export default function Diagnosis() {
         prescription: prescription,
         symptoms: analysis?.symptoms || patientTwin?.extracted_symptoms?.map(s => s.symptom) || [],
         predictions: analysis?.predictions || patientTwin?.diagnosis_predictions || [],
+        edge_cases: edgeCases,
       }, { responseType: 'blob' });
       
       // Create blob from PDF data
@@ -543,6 +556,107 @@ export default function Diagnosis() {
                       <option key={i} value={d.disease} />
                     ))}
                   </datalist>
+                </div>
+
+                {/* Edge cases to monitor (doctor or AI) + further steps */}
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4">
+                  <label className="block text-sm font-medium text-yellow-200 mb-2 flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-2" />
+                    Edge cases / things to watch for
+                  </label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Add conditions to monitor and the further steps the patient should take. These will appear on the patient portal.
+                  </p>
+                  {/* Current list with further steps */}
+                  {edgeCases.length > 0 && (
+                    <div className="space-y-3 mb-4">
+                      {edgeCases.map((edge, i) => (
+                        <div
+                          key={i}
+                          className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3"
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <span className="font-medium text-yellow-200 text-sm">{edge.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setEdgeCases((prev) => prev.filter((_, j) => j !== i))}
+                              className="hover:bg-yellow-500/30 rounded p-1 shrink-0"
+                              aria-label="Remove"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <label className="block text-xs text-gray-400 mb-1">Further steps for patient</label>
+                          <textarea
+                            value={edge.further_steps}
+                            onChange={(e) =>
+                              setEdgeCases((prev) =>
+                                prev.map((ec, j) => (j === i ? { ...ec, further_steps: e.target.value } : ec))
+                              )
+                            }
+                            rows={2}
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent resize-y"
+                            placeholder="e.g. Return if fever &gt; 101°F, or if symptoms worsen within 48 hours"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* AI-recommended (not already added) */}
+                  {(() => {
+                    const aiSuggested = [...new Set([
+                      ...(analysis?.edge_cases || []),
+                      ...(patientTwin?.diagnosis_predictions || []).filter((p) => p.is_edge_case && p.disease).map((p) => p.disease)
+                    ])].filter((s) => !edgeCases.some((e) => e.name === s));
+                    return aiSuggested.length > 0 ? (
+                      <div className="mb-3">
+                        <p className="text-xs text-gray-400 mb-2">AI suggested:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {aiSuggested.map((s, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setEdgeCases((prev) => [...prev, { name: s, further_steps: '' }])}
+                              className="text-sm px-2.5 py-1 rounded-lg border border-yellow-500/40 text-yellow-300 hover:bg-yellow-500/20 transition-colors"
+                            >
+                              + {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                  {/* Add custom */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={edgeCaseInput}
+                      onChange={(e) => setEdgeCaseInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (edgeCaseInput.trim()) {
+                            setEdgeCases((prev) => [...prev, { name: edgeCaseInput.trim(), further_steps: '' }]);
+                            setEdgeCaseInput('');
+                          }
+                        }
+                      }}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                      placeholder="Add custom edge case or thing to monitor"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (edgeCaseInput.trim()) {
+                          setEdgeCases((prev) => [...prev, { name: edgeCaseInput.trim(), further_steps: '' }]);
+                          setEdgeCaseInput('');
+                        }
+                      }}
+                      className="flex items-center gap-1 px-3 py-2 rounded-lg bg-yellow-500/20 text-yellow-200 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> Add
+                    </button>
+                  </div>
                 </div>
                 
                 {/* Medication and Dosage */}

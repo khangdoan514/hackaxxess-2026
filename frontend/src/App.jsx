@@ -6,8 +6,13 @@ import DoctorDashboard from './pages/DoctorDashboard';
 import Record from './pages/Record';
 import Diagnosis from './pages/Diagnosis';
 import PatientDashboard from './pages/PatientDashboard';
+<<<<<<< HEAD
 import Appointment from './pages/Appointment';
 import Profile from './pages/Profile';
+=======
+import PatientProfile from './pages/PatientProfile';
+import PatientAppointments from './pages/PatientAppointments';
+>>>>>>> d88a48232bafd0af03110619d3b4f0d659d8d619
 import './App.css';
 
 function App() {
@@ -82,6 +87,22 @@ function App() {
             element={
               <ProtectedRoute role="patient">
                 <PatientDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute role="patient">
+                <PatientProfile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/appointments"
+            element={
+              <ProtectedRoute role="patient">
+                <PatientAppointments />
               </ProtectedRoute>
             }
           />
