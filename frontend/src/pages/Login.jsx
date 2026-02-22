@@ -15,10 +15,27 @@ export default function Login() {
   const from = location.state?.from?.pathname || (user?.role === 'doctor' ? '/record' : '/dashboard');
 
   if (isAuthenticated && user) {
-    navigate(user.role === 'doctor' ? '/record' : '/dashboard', { replace: true });
+    // Instead of showing "Redirecting..." immediately, show a message with links
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <p className="text-gray-400">Redirecting...</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900">
+        <p className="text-gray-400 mb-4">You are already logged in as {user.role}.</p>
+        <div className="flex gap-4">
+          <button
+            onClick={() => navigate(user.role === 'doctor' ? '/record' : '/dashboard')}
+            className="rounded-lg bg-blue-600 px-4 py-2 hover:bg-blue-700"
+          >
+            Go to {user.role === 'doctor' ? 'Record' : 'Dashboard'}
+          </button>
+          <button
+            onClick={() => {
+              localStorage.clear();
+              window.location.reload();
+            }}
+            className="rounded-lg border border-gray-600 px-4 py-2 hover:bg-gray-800"
+          >
+            Logout
+          </button>
+        </div>
       </div>
     );
   }

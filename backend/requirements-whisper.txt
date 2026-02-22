@@ -1,3 +1,0 @@
-# Optional: Speech-to-text. Install after main requirements.
-# On Windows, if "av" fails to build, use WSL or a conda env with ffmpeg.
-faster-whisper==1.0.3

@@ -1,6 +1,3 @@
-"""
-API route definitions: auth, record upload/transcribe, diagnosis analyze/confirm, patient.
-"""
 import logging
 import re
 import uuid
@@ -298,10 +295,31 @@ async def record_transcribe(
         raise HTTPException(404, "Upload not found or expired")
     path_str = str(path)
     try:
-        from faster_whisper import WhisperModel # type: ignore
-        model = WhisperModel("large-v3", device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(path_str)
-        transcript = " ".join(s["text"] for s in segments).strip() or "[No speech detected]"
+        from faster_whisper import WhisperModel
+        model = WhisperModel("base", device="cpu", compute_type="int8")
+        
+        # Transcribe
+        segments, info = model.transcribe(path_str)
+        print(f"✅ Detected language: {info.language}")
+        
+        # Fix: segments is an iterator, not a list of dicts
+        transcript_parts = []
+        for segment in segments:
+            # Check what type segment is
+            if hasattr(segment, 'text'):
+                transcript_parts.append(segment.text)
+            elif isinstance(segment, dict):
+                transcript_parts.append(segment.get('text', ''))
+            elif isinstance(segment, (list, tuple)):
+                # If it's a tuple/list, try to get text from the first element
+                if len(segment) > 0:
+                    transcript_parts.append(str(segment[0]))
+            else:
+                transcript_parts.append(str(segment))
+        
+        transcript = " ".join(transcript_parts).strip() or "[No speech detected]"
+        print(f"Transcript: {transcript[:100]}...")
+        
         try:
             path.unlink(missing_ok=True)
         except Exception:
@@ -309,7 +327,7 @@ async def record_transcribe(
         _upload_paths.pop(body.upload_id, None)
         return TranscribeResponse(transcript=transcript, upload_id=body.upload_id)
     except ImportError:
-        # Stub when faster_whisper not installed or failing
+        # Stub when faster_whisper not installed
         return TranscribeResponse(
             transcript=STUB_TRANSCRIPT_MESSAGE,
             upload_id=body.upload_id,
@@ -317,6 +335,9 @@ async def record_transcribe(
         )
     except Exception as e:
         logger.exception("Transcribe failed: %s", e)
+        print(f"Transcription error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Transcription failed: {e}")
 
 

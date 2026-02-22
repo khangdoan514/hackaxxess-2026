@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Record from './pages/Record';
 import Diagnosis from './pages/Diagnosis';
 import PatientDashboard from './pages/PatientDashboard';
+import Landing from './pages/Landing';
 import './App.css';
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route
             path="/record"
@@ -37,8 +39,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
