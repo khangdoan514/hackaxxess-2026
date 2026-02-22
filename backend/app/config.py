@@ -37,9 +37,6 @@ VECTORIZER_PATH = _resolve_path("VECTORIZER_PATH", DATA_DIR / "vectorizer.pkl")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "diagnosis_decoder")
 
-# Kaggle (for training)
-KAGGLE_DATASET = os.getenv("KAGGLE_DATASET", "kaushil268/disease-prediction-using-machine-learning")
-
 # Auth (JWT)
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = "HS256"

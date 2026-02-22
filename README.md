@@ -243,7 +243,7 @@ project-root/
 │   │   ├── config.py     # Configuration
 │   │   └── auth.py       # JWT and password hashing
 │   ├── data/             # model.pkl, vectorizer.pkl, uploads (add after training)
-│   ├── train.py          # KNN training script (Kaggle dataset)
+│   ├── train.py          # KNN training script (symptoms-to-disease CSV)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
@@ -277,19 +277,17 @@ Backend runs at **http://localhost:8000**.
 
 Frontend runs at **http://localhost:5173**.
 
-### Kaggle & ML training
+### ML training
 
-1. Install Kaggle CLI: `pip install kaggle`
-2. Place `kaggle.json` in `~/.kaggle` (Linux/Mac) or `C:\Users\<username>\.kaggle` (Windows)
-3. From `backend/`: `python train.py` (downloads dataset and writes `data/model.pkl`, `data/vectorizer.pkl`)
+Uses **kagglehub** to download [abhishekgodara/symptoms-to-diseases](https://www.kaggle.com/datasets/abhishekgodara/symptoms-to-diseases) if the CSV is not already in `backend/data/`.
 
-Or download manually:
+1. **Authenticate with Kaggle** (needed for download): [Kaggle API token](https://www.kaggle.com/settings) → copy token, then either:
+   - `export KAGGLE_API_TOKEN=your_token` (Linux/Mac) or `set KAGGLE_API_TOKEN=your_token` (Windows CMD), or
+   - run `python -c "import kagglehub; kagglehub.login()"` and paste the token when prompted.
+2. From `backend/` (with venv activated): `python train.py`  
+   If `final_symptoms_to_disease.csv` is not in `data/`, it will be downloaded via kagglehub; then the script writes `data/model.pkl` and `data/vectorizer.pkl`.
 
-```bash
-kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend/data --unzip
-```
-
-Then run `python train.py` from `backend/`.
+Optional env: `DATA_DIR` (default `backend/data`), `TRAIN_CSV` (default `final_symptoms_to_disease.csv`).
 
 ### Environment variables
 
@@ -299,9 +297,8 @@ Then run `python train.py` from `backend/`.
 - `DB_NAME` — Database name (default: `diagnosis_decoder`)
 - `MODEL_PATH` — Path to `model.pkl` (default: `backend/data/model.pkl`)
 - `VECTORIZER_PATH` — Path to `vectorizer.pkl`
+- `DATA_DIR` — Directory for data and training CSV (default: `backend/data`)
 - `JWT_SECRET` — Secret for JWT signing (set in production)
-- `KAGGLE_DATASET` — Kaggle dataset (for training script)
-- `DATA_DIR` — Directory for data (default: `backend/data`)
 
 **Frontend** (e.g. `frontend/.env`):
 
