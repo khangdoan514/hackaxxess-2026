@@ -257,37 +257,81 @@ project-root/
 
 ### Backend
 
-1. From project root: `cd backend`
-2. Create venv: `python -m venv venv`
-3. Activate: `venv\Scripts\activate` (Windows) or `source venv/bin/activate` (Linux/Mac)
-4. Install: `pip install -r requirements.txt`
-5. Optional: set `.env` in `backend/` (see below)
-6. Run: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` (from `backend/` so `app` package is found)
+**Windows (PowerShell or CMD):**
 
-**Optional – Speech-to-text (Whisper):** If `pip install -r requirements.txt` fails on Windows with an error building the `av` package (FFmpeg bindings), the core app will still run; the transcribe endpoint returns a stub transcript. To enable real transcription, install Whisper separately (e.g. in WSL or a conda env with FFmpeg): `pip install -r requirements-whisper.txt`.
+```powershell
+cd backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+If you get an execution policy error when activating, run: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` (PowerShell), or use CMD and run: `venv\Scripts\activate.bat` instead.
+
+**macOS / Linux (Terminal):**
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Then (all platforms):** Copy `backend/.env.example` to `backend/.env` and edit if needed (see Configuration reference). From the `backend/` directory (with venv active):
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
 Backend runs at **http://localhost:8000**.
 
+**Optional – Speech-to-text (Whisper):** On Windows, `pip install -r requirements-whisper.txt` often fails (FFmpeg/`av` build). The app works without it; doctors can paste the transcript on the Diagnosis page. On macOS you can try: `pip install -r requirements-whisper.txt`. For real transcription on Windows, use WSL or a conda env.
+
+---
+
 ### Frontend
 
-1. From project root: `cd frontend`
-2. Install: `npm install`
-3. Copy `.env.example` to `.env` and set `VITE_API_URL=http://localhost:8000`
-4. Run: `npm run dev`
+**Windows (PowerShell or CMD):**
 
-Frontend runs at **http://localhost:5173**.
+```powershell
+cd frontend
+npm install
+copy .env.example .env
+npm run dev
+```
 
-### Kaggle & ML training
-
-1. Install Kaggle CLI: `pip install kaggle`
-2. Place `kaggle.json` in `~/.kaggle` (Linux/Mac) or `C:\Users\<username>\.kaggle` (Windows)
-3. From `backend/`: `python train.py` (downloads dataset and writes `data/model.pkl`, `data/vectorizer.pkl`)
-
-Or download manually:
+**macOS / Linux (Terminal):**
 
 ```bash
-kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend/data --unzip
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
 ```
+
+For local dev, leave `VITE_API_URL` empty in `frontend/.env` so the Vite proxy is used. Frontend runs at **http://localhost:5173**.
+
+---
+
+### Kaggle & ML training (optional)
+
+**Windows:** Place `kaggle.json` in `C:\Users\<YourUsername>\.kaggle\kaggle.json`.
+
+**macOS / Linux:** Place `kaggle.json` in `~/.kaggle/kaggle.json` and run `chmod 600 ~/.kaggle/kaggle.json`.
+
+**Then (all platforms, from project root):**
+
+```bash
+cd backend
+# with venv activated
+pip install kaggle
+python train.py
+```
+
+Or download the dataset manually:
+
+- **Windows:** `kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend\data --unzip`
+- **macOS / Linux:** `kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend/data --unzip`
 
 Then run `python train.py` from `backend/`.
 
