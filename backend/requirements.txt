@@ -9,6 +9,7 @@ python-dotenv==1.0.1
 scikit-learn==1.5.2
 numpy==2.2.0
 pandas==2.2.3
+kagglehub>=0.2.0
 
 # Whisper
 faster-whisper==1.0.3
@@ -20,5 +21,3 @@ pymongo==4.10.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 
-# Kaggle (for training script)
-kaggle==1.6.12

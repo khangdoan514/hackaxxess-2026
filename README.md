@@ -243,7 +243,7 @@ project-root/
 │   │   ├── config.py     # Configuration
 │   │   └── auth.py       # JWT and password hashing
 │   ├── data/             # model.pkl, vectorizer.pkl, uploads (add after training)
-│   ├── train.py          # KNN training script (Kaggle dataset)
+│   ├── train.py          # KNN training script (symptoms-to-disease CSV)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
@@ -313,27 +313,17 @@ For local dev, leave `VITE_API_URL` empty in `frontend/.env` so the Vite proxy i
 
 ---
 
-### Kaggle & ML training (optional)
+### ML training
 
-**Windows:** Place `kaggle.json` in `C:\Users\<YourUsername>\.kaggle\kaggle.json`.
+Uses **kagglehub** to download [abhishekgodara/symptoms-to-diseases](https://www.kaggle.com/datasets/abhishekgodara/symptoms-to-diseases) if the CSV is not already in `backend/data/`.
 
-**macOS / Linux:** Place `kaggle.json` in `~/.kaggle/kaggle.json` and run `chmod 600 ~/.kaggle/kaggle.json`.
+1. **Authenticate with Kaggle** (needed for download): [Kaggle API token](https://www.kaggle.com/settings) → copy token, then either:
+   - `export KAGGLE_API_TOKEN=your_token` (Linux/Mac) or `set KAGGLE_API_TOKEN=your_token` (Windows CMD), or
+   - run `python -c "import kagglehub; kagglehub.login()"` and paste the token when prompted.
+2. From `backend/` (with venv activated): `python train.py`  
+   If `final_symptoms_to_disease.csv` is not in `data/`, it will be downloaded via kagglehub; then the script writes `data/model.pkl` and `data/vectorizer.pkl`.
 
-**Then (all platforms, from project root):**
-
-```bash
-cd backend
-# with venv activated
-pip install kaggle
-python train.py
-```
-
-Or download the dataset manually:
-
-- **Windows:** `kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend\data --unzip`
-- **macOS / Linux:** `kaggle datasets download -d kaushil268/disease-prediction-using-machine-learning -p backend/data --unzip`
-
-Then run `python train.py` from `backend/`.
+Optional env: `DATA_DIR` (default `backend/data`), `TRAIN_CSV` (default `final_symptoms_to_disease.csv`).
 
 ### Configuration reference
 
@@ -348,7 +338,6 @@ All config is via environment variables. Use a `.env` file in each app folder (s
 | `DATA_DIR` | Directory for ML files and uploads. Relative to `backend/`. | `data` → `backend/data` | No |
 | `MODEL_PATH` | Path to trained KNN model file. Relative to `backend/` or absolute. | `data/model.pkl` | No (analysis returns stub if missing) |
 | `VECTORIZER_PATH` | Path to symptom vectorizer pickle. Relative to `backend/` or absolute. | `data/vectorizer.pkl` | No |
-| `KAGGLE_DATASET` | Kaggle dataset for training script (e.g. `owner/dataset-name`). | `kaushil268/disease-prediction-using-machine-learning` | No (only for `train.py`) |
 | `JWT_SECRET` | Secret key for signing JWTs. Use a long random string in production. | `change-me-in-production` | Yes in production |
 
 **Backend path rules:** Relative values (e.g. `data`, `data/model.pkl`) are resolved from the `backend/` directory. Absolute paths are used as-is.
@@ -361,7 +350,6 @@ DB_NAME=diagnosis_decoder
 DATA_DIR=data
 MODEL_PATH=data/model.pkl
 VECTORIZER_PATH=data/vectorizer.pkl
-KAGGLE_DATASET=kaushil268/disease-prediction-using-machine-learning
 JWT_SECRET=your-long-random-secret-here
 ```
 
